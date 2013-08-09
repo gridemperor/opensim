@@ -79,11 +79,27 @@ namespace OpenSim.Services.Connectors.Simulation
             return "agent/";
         }
 
+        protected virtual void PackData(OSDMap args, AgentCircuitData aCircuit, GridRegion destination, uint flags)
+        {
+                args["destination_x"] = OSD.FromString(destination.RegionLocX.ToString());
+                args["destination_y"] = OSD.FromString(destination.RegionLocY.ToString());
+                args["destination_name"] = OSD.FromString(destination.RegionName);
+                args["destination_uuid"] = OSD.FromString(destination.RegionID.ToString());
+                args["teleport_flags"] = OSD.FromString(flags.ToString());
+        }
+
         public bool CreateAgent(GridRegion destination, AgentCircuitData aCircuit, uint flags, out string reason)
         {
-            // m_log.DebugFormat("[REMOTE SIMULATION CONNECTOR]: CreateAgent start");
-            
+            string tmp = String.Empty;
+            return CreateAgent(destination, aCircuit, flags, out tmp, out reason);
+        }
+
+        public bool CreateAgent(GridRegion destination, AgentCircuitData aCircuit, uint flags, out string myipaddress, out string reason)
+        {
+            m_log.DebugFormat("[REMOTE SIMULATION CONNECTOR]: Creating agent at {0}", destination.ServerURI);
             reason = String.Empty;
+            myipaddress = String.Empty;
+
             if (destination == null)
             {
                 m_log.Debug("[REMOTE SIMULATION CONNECTOR]: Given destination is null");
@@ -95,12 +111,7 @@ namespace OpenSim.Services.Connectors.Simulation
             try
             {
                 OSDMap args = aCircuit.PackAgentCircuitData();
-
-                args["destination_x"] = OSD.FromString(destination.RegionLocX.ToString());
-                args["destination_y"] = OSD.FromString(destination.RegionLocY.ToString());
-                args["destination_name"] = OSD.FromString(destination.RegionName);
-                args["destination_uuid"] = OSD.FromString(destination.RegionID.ToString());
-                args["teleport_flags"] = OSD.FromString(flags.ToString());
+                PackData(args, aCircuit, destination, flags);
 
                 OSDMap result = WebUtil.PostToServiceCompressed(uri, args, 30000);
                 bool success = result["success"].AsBoolean();
@@ -110,6 +121,7 @@ namespace OpenSim.Services.Connectors.Simulation
 
                     reason = data["reason"].AsString();
                     success = data["success"].AsBoolean();
+                    myipaddress = data["your_ip"].AsString();
                     return success;
                 }
               
@@ -124,6 +136,7 @@ namespace OpenSim.Services.Connectors.Simulation
 
                         reason = data["reason"].AsString();
                         success = data["success"].AsBoolean();
+                        myipaddress = data["your_ip"].AsString();
                         m_log.WarnFormat(
                             "[REMOTE SIMULATION CONNECTOR]: Remote simulator {0} did not accept compressed transfer, suggest updating it.", destination.RegionName);
                         return success;
@@ -228,7 +241,7 @@ namespace OpenSim.Services.Connectors.Simulation
         /// </summary>
         private bool UpdateAgent(GridRegion destination, IAgentData cAgentData, int timeout)
         {
-            // m_log.DebugFormat("[REMOTE SIMULATION CONNECTOR]: UpdateAgent start");
+            // m_log.DebugFormat("[REMOTE SIMULATION CONNECTOR]: UpdateAgent in {0}", destination.ServerURI);
 
             // Eventually, we want to use a caps url instead of the agentID
             string uri = destination.ServerURI + AgentPath() + cAgentData.AgentID + "/";
@@ -258,41 +271,6 @@ namespace OpenSim.Services.Connectors.Simulation
             return false;
         }
 
-        /// <summary>
-        /// Not sure what sequence causes this function to be invoked. The only calling
-        /// path is through the GET method 
-        /// </summary>
-        public bool RetrieveAgent(GridRegion destination, UUID id, out IAgentData agent)
-        {
-            // m_log.DebugFormat("[REMOTE SIMULATION CONNECTOR]: RetrieveAgent start");
-
-            agent = null;
-
-            // Eventually, we want to use a caps url instead of the agentID
-            string uri = destination.ServerURI + AgentPath() + id + "/" + destination.RegionID.ToString() + "/";
-
-            try
-            {
-                OSDMap result = WebUtil.GetFromService(uri, 10000);
-                if (result["Success"].AsBoolean())
-                {
-                    // OSDMap args = Util.GetOSDMap(result["_RawResult"].AsString());
-                    OSDMap args = (OSDMap)result["_Result"];
-                    if (args != null)
-                    {
-                        agent = new CompleteAgentData();
-                        agent.Unpack(args, null);
-                        return true;
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                m_log.Warn("[REMOTE SIMULATION CONNECTOR]: UpdateAgent failed with exception: " + e.ToString());
-            }
-
-            return false;
-        }
 
         /// <summary>
         /// </summary>
@@ -389,11 +367,10 @@ namespace OpenSim.Services.Connectors.Simulation
 
         /// <summary>
         /// </summary>
-        public bool CloseAgent(GridRegion destination, UUID id)
+        public bool CloseAgent(GridRegion destination, UUID id, string auth_code)
         {
-//            m_log.DebugFormat("[REMOTE SIMULATION CONNECTOR]: CloseAgent start");
-
-            string uri = destination.ServerURI + AgentPath() + id + "/" + destination.RegionID.ToString() + "/";
+            string uri = destination.ServerURI + AgentPath() + id + "/" + destination.RegionID.ToString() + "/?auth=" + auth_code;
+            m_log.DebugFormat("[REMOTE SIMULATION CONNECTOR]: CloseAgent {0}", uri);
 
             try
             {

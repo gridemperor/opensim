@@ -554,6 +554,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
             return m_LSL_Functions.llGetLinkNumberOfSides(link);
         }
 
+        public void llSetKeyframedMotion(LSL_List frames, LSL_List options)
+        {
+            m_LSL_Functions.llSetKeyframedMotion(frames, options);
+        }
+
         public LSL_Integer llGetListEntryType(LSL_List src, int index)
         {
             return m_LSL_Functions.llGetListEntryType(src, index);
@@ -1523,6 +1528,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
             m_LSL_Functions.llSetColor(color, face);
         }
 
+        public void llSetContentType(LSL_Key id, LSL_Integer type)
+        {
+            m_LSL_Functions.llSetContentType(id, type);
+        }
+
         public void llSetDamage(double damage)
         {
             m_LSL_Functions.llSetDamage(damage);
@@ -1536,6 +1546,16 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public void llSetForceAndTorque(LSL_Vector force, LSL_Vector torque, int local)
         {
             m_LSL_Functions.llSetForceAndTorque(force, torque, local);
+        }
+
+        public void llSetVelocity(LSL_Vector force, int local)
+        {
+            m_LSL_Functions.llSetVelocity(force, local);
+        }
+
+        public void llSetAngularVelocity(LSL_Vector force, int local)
+        {
+            m_LSL_Functions.llSetAngularVelocity(force, local);
         }
 
         public void llSetHoverHeight(double height, int water, double tau)

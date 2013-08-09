@@ -33,14 +33,6 @@ using OMV = OpenMetaverse;
 namespace OpenSim.Region.Physics.BulletSPlugin
 {
 
-// A BSPrim can get individual information about its linkedness attached
-//    to it through an instance of a subclass of LinksetInfo.
-// Each type of linkset will define the information needed for its type.
-public abstract class BSLinksetInfo
-{
-    public virtual void Clear() { }
-}
-
 public abstract class BSLinkset
 {
     // private static string LogHeader = "[BULLETSIM LINKSET]";
@@ -56,15 +48,15 @@ public abstract class BSLinkset
     {
         BSLinkset ret = null;
 
-        switch ((int)BSParam.LinksetImplementation)
+        switch (parent.LinksetType)
         {
-            case (int)LinksetImplementation.Constraint:
+            case LinksetImplementation.Constraint:
                 ret = new BSLinksetConstraints(physScene, parent);
                 break;
-            case (int)LinksetImplementation.Compound:
+            case LinksetImplementation.Compound:
                 ret = new BSLinksetCompound(physScene, parent);
                 break;
-            case (int)LinksetImplementation.Manual:
+            case LinksetImplementation.Manual:
                 // ret = new BSLinksetManual(physScene, parent);
                 break;
             default:
@@ -78,6 +70,17 @@ public abstract class BSLinkset
         return ret;
     }
 
+    public class BSLinkInfo
+    {
+        public BSPrimLinkable member;
+        public BSLinkInfo(BSPrimLinkable pMember)
+        {
+            member = pMember;
+        }
+    }
+
+    public LinksetImplementation LinksetImpl { get; protected set; }
+
     public BSPrimLinkable LinksetRoot { get; protected set; }
 
     protected BSScene m_physicsScene { get; private set; }
@@ -86,7 +89,8 @@ public abstract class BSLinkset
     public int LinksetID { get; private set; }
 
     // The children under the root in this linkset.
-    protected HashSet<BSPrimLinkable> m_children;
+    // protected HashSet<BSPrimLinkable> m_children;
+    protected Dictionary<BSPrimLinkable, BSLinkInfo> m_children;
 
     // We lock the diddling of linkset classes to prevent any badness.
     // This locks the modification of the instances of this class. Changes
@@ -117,7 +121,7 @@ public abstract class BSLinkset
             m_nextLinksetID = 1;
         m_physicsScene = scene;
         LinksetRoot = parent;
-        m_children = new HashSet<BSPrimLinkable>();
+        m_children = new Dictionary<BSPrimLinkable, BSLinkInfo>();
         LinksetMass = parent.RawMass;
         Rebuilding = false;
 
@@ -178,17 +182,7 @@ public abstract class BSLinkset
         bool ret = false;
         lock (m_linksetActivityLock)
         {
-            ret = m_children.Contains(child);
-            /* Safer version but the above should work
-            foreach (BSPrimLinkable bp in m_children)
-            {
-                if (child.LocalID == bp.LocalID)
-                {
-                    ret = true;
-                    break;
-                }
-            }
-             */
+            ret = m_children.ContainsKey(child);
         }
         return ret;
     }
@@ -202,12 +196,56 @@ public abstract class BSLinkset
         lock (m_linksetActivityLock)
         {
             action(LinksetRoot);
-            foreach (BSPrimLinkable po in m_children)
+            foreach (BSPrimLinkable po in m_children.Keys)
             {
                 if (action(po))
                     break;
             }
         }
+        return ret;
+    }
+
+    // Perform an action on each member of the linkset including root prim.
+    // Depends on the action on whether this should be done at taint time.
+    public delegate bool ForEachLinkInfoAction(BSLinkInfo obj);
+    public virtual bool ForEachLinkInfo(ForEachLinkInfoAction action)
+    {
+        bool ret = false;
+        lock (m_linksetActivityLock)
+        {
+            foreach (BSLinkInfo po in m_children.Values)
+            {
+                if (action(po))
+                    break;
+            }
+        }
+        return ret;
+    }
+
+    // Called after a simulation step to post a collision with this object.
+    // Return 'true' if linkset processed the collision. 'false' says the linkset didn't have
+    //     anything to add for the collision and it should be passed through normal processing.
+    // Default processing for a linkset.
+    public virtual bool HandleCollide(uint collidingWith, BSPhysObject collidee,
+                                OMV.Vector3 contactPoint, OMV.Vector3 contactNormal, float pentrationDepth)
+    {
+        bool ret = false;
+
+        // prims in the same linkset cannot collide with each other
+        BSPrimLinkable convCollidee = collidee as BSPrimLinkable;
+        if (convCollidee != null && (LinksetID == convCollidee.Linkset.LinksetID))
+        {
+            // By returning 'true', we tell the caller the collision has been 'handled' so it won't
+            //     do anything about this collision and thus, effectivily, ignoring the collision.
+            ret = true;
+        }
+        else
+        {
+            // Not a collision between members of the linkset. Must be a real collision.
+            // So the linkset root can know if there is a collision anywhere in the linkset.
+            LinksetRoot.SomeCollisionSimulationStep = m_physicsScene.SimulationStep;
+        }
+
         return ret;
     }
 
@@ -259,6 +297,85 @@ public abstract class BSLinkset
     public abstract bool RemoveDependencies(BSPrimLinkable child);
 
     // ================================================================
+    // Some physical setting happen to all members of the linkset
+    public virtual void SetPhysicalFriction(float friction)
+    {
+        ForEachMember((member) =>
+            {
+                if (member.PhysBody.HasPhysicalBody)
+                    m_physicsScene.PE.SetFriction(member.PhysBody, friction);
+                return false;   // 'false' says to continue looping
+            }
+        );
+    }
+    public virtual void SetPhysicalRestitution(float restitution)
+    {
+        ForEachMember((member) =>
+            {
+                if (member.PhysBody.HasPhysicalBody)
+                    m_physicsScene.PE.SetRestitution(member.PhysBody, restitution);
+                return false;   // 'false' says to continue looping
+            }
+        );
+    }
+    public virtual void SetPhysicalGravity(OMV.Vector3 gravity)
+    {
+        ForEachMember((member) =>
+            {
+                if (member.PhysBody.HasPhysicalBody)
+                    m_physicsScene.PE.SetGravity(member.PhysBody, gravity);
+                return false;   // 'false' says to continue looping
+            }
+        );
+    }
+    public virtual void ComputeAndSetLocalInertia(OMV.Vector3 inertiaFactor, float linksetMass)
+    {
+        ForEachMember((member) =>
+            {
+                if (member.PhysBody.HasPhysicalBody)
+                {
+                    OMV.Vector3 inertia = m_physicsScene.PE.CalculateLocalInertia(member.PhysShape.physShapeInfo, linksetMass);
+                    member.Inertia = inertia * inertiaFactor;
+                    m_physicsScene.PE.SetMassProps(member.PhysBody, linksetMass, member.Inertia);
+                    m_physicsScene.PE.UpdateInertiaTensor(member.PhysBody);
+                    DetailLog("{0},BSLinkset.ComputeAndSetLocalInertia,m.mass={1}, inertia={2}", member.LocalID, linksetMass, member.Inertia);
+
+                }
+                return false;   // 'false' says to continue looping
+            }
+        );
+    }
+    public virtual void SetPhysicalCollisionFlags(CollisionFlags collFlags)
+    {
+        ForEachMember((member) =>
+            {
+                if (member.PhysBody.HasPhysicalBody)
+                    m_physicsScene.PE.SetCollisionFlags(member.PhysBody, collFlags);
+                return false;   // 'false' says to continue looping
+            }
+        );
+    }
+    public virtual void AddToPhysicalCollisionFlags(CollisionFlags collFlags)
+    {
+        ForEachMember((member) =>
+            {
+                if (member.PhysBody.HasPhysicalBody)
+                    m_physicsScene.PE.AddToCollisionFlags(member.PhysBody, collFlags);
+                return false;   // 'false' says to continue looping
+            }
+        );
+    }
+    public virtual void RemoveFromPhysicalCollisionFlags(CollisionFlags collFlags)
+    {
+        ForEachMember((member) =>
+            {
+                if (member.PhysBody.HasPhysicalBody)
+                    m_physicsScene.PE.RemoveFromCollisionFlags(member.PhysBody, collFlags);
+                return false;   // 'false' says to continue looping
+            }
+        );
+    }
+    // ================================================================
     protected virtual float ComputeLinksetMass()
     {
         float mass = LinksetRoot.RawMass;
@@ -266,7 +383,7 @@ public abstract class BSLinkset
         {
             lock (m_linksetActivityLock)
             {
-                foreach (BSPrimLinkable bp in m_children)
+                foreach (BSPrimLinkable bp in m_children.Keys)
                 {
                     mass += bp.RawMass;
                 }
@@ -284,7 +401,7 @@ public abstract class BSLinkset
             com = LinksetRoot.Position * LinksetRoot.RawMass;
             float totalMass = LinksetRoot.RawMass;
 
-            foreach (BSPrimLinkable bp in m_children)
+            foreach (BSPrimLinkable bp in m_children.Keys)
             {
                 com += bp.Position * bp.RawMass;
                 totalMass += bp.RawMass;
@@ -303,7 +420,7 @@ public abstract class BSLinkset
         {
             com = LinksetRoot.Position;
 
-            foreach (BSPrimLinkable bp in m_children)
+            foreach (BSPrimLinkable bp in m_children.Keys)
             {
                 com += bp.Position;
             }
@@ -319,6 +436,5 @@ public abstract class BSLinkset
         if (m_physicsScene.PhysicsLogging.Enabled)
             m_physicsScene.DetailLog(msg, args);
     }
-
 }
 }

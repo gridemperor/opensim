@@ -106,6 +106,7 @@ namespace OpenSim.Tests.Common.Mock
         public event Action<IClientAPI, bool> OnCompleteMovementToRegion;
         public event UpdateAgent OnPreAgentUpdate;
         public event UpdateAgent OnAgentUpdate;
+        public event UpdateAgent OnAgentCameraUpdate;
         public event AgentRequestSit OnAgentRequestSit;
         public event AgentSit OnAgentSit;
         public event AvatarPickerRequest OnAvatarPickerRequest;
@@ -584,7 +585,7 @@ namespace OpenSim.Tests.Common.Mock
         {
             AgentCircuitData agentData = new AgentCircuitData();
             agentData.AgentID = AgentId;
-            agentData.SessionID = UUID.Zero;
+            agentData.SessionID = SessionId; 
             agentData.SecureSessionID = UUID.Zero;
             agentData.circuitcode = m_circuitCode;
             agentData.child = false;
@@ -651,7 +652,7 @@ namespace OpenSim.Tests.Common.Mock
         {
         }
 
-        public virtual void SendMoneyBalance(UUID transaction, bool success, byte[] description, int balance)
+        public virtual void SendMoneyBalance(UUID transaction, bool success, byte[] description, int balance, int transactionType, UUID sourceID, bool sourceIsGroup, UUID destID, bool destIsGroup, int amount, string item)
         {
         }
 
@@ -873,11 +874,6 @@ namespace OpenSim.Tests.Common.Mock
         public void SendGroupMembership(GroupMembershipData[] GroupMembership)
         {
 
-        }
-
-        public bool AddMoney(int debit)
-        {
-            return false;
         }
 
         public void SendSunPos(Vector3 sunPos, Vector3 sunVel, ulong time, uint dlen, uint ylen, float phase)
@@ -1260,7 +1256,7 @@ namespace OpenSim.Tests.Common.Mock
         {
         }
 
-        public void StopFlying(ISceneEntity presence)
+        public void SendAgentTerseUpdate(ISceneEntity presence)
         {
         }
 

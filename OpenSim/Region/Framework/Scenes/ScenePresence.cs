@@ -29,7 +29,9 @@ using System;
 using System.Xml;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Threading;
 using System.Timers;
+using Timer = System.Timers.Timer;
 using OpenMetaverse;
 using log4net;
 using Nini.Config;
@@ -77,7 +79,7 @@ namespace OpenSim.Region.Framework.Scenes
 //            m_log.DebugFormat("[SCENE PRESENCE]: Destructor called on {0}", Name);
 //        }
 
-        private void TriggerScenePresenceUpdated()
+        public void TriggerScenePresenceUpdated()
         {
             if (m_scene != null)
                 m_scene.EventManager.TriggerScenePresenceUpdated(this);
@@ -121,6 +123,8 @@ namespace OpenSim.Region.Framework.Scenes
         /// <remarks>
         /// TODO: For some reason, we effectively have a list both here and in Appearance.  Need to work out if this is
         /// necessary.
+        /// NOTE: To avoid deadlocks, do not lock m_attachments and then perform other tasks under that lock.  Take a copy
+        /// of the list and act on that instead.
         /// </remarks>
         private List<SceneObjectGroup> m_attachments = new List<SceneObjectGroup>();
 
@@ -281,9 +285,23 @@ namespace OpenSim.Region.Framework.Scenes
         /// </summary>
         private Vector3 posLastSignificantMove;
 
-        // For teleports and crossings callbacks
+        #region For teleports and crossings callbacks
+
+        /// <summary>
+        /// In the V1 teleport protocol, the destination simulator sends ReleaseAgent to this address.
+        /// </summary>
         string m_callbackURI;
+
         UUID m_originRegionID;
+
+        /// <summary>
+        /// Used by the entity transfer module to signal when the presence should not be closed because a subsequent
+        /// teleport is reusing the connection.
+        /// </summary>
+        /// <remarks>May be refactored or move somewhere else soon.</remarks>
+        public bool DoNotCloseAfterTeleport { get; set; }
+
+        #endregion
 
         /// <value>
         /// Script engines present in the scene
@@ -799,6 +817,7 @@ namespace OpenSim.Region.Framework.Scenes
         {
             ControllingClient.OnCompleteMovementToRegion += CompleteMovement;
             ControllingClient.OnAgentUpdate += HandleAgentUpdate;
+            ControllingClient.OnAgentCameraUpdate += HandleAgentCamerasUpdate;
             ControllingClient.OnAgentRequestSit += HandleAgentRequestSit;
             ControllingClient.OnAgentSit += HandleAgentSit;
             ControllingClient.OnSetAlwaysRun += HandleSetAlwaysRun;
@@ -971,19 +990,27 @@ namespace OpenSim.Region.Framework.Scenes
                 // and CHANGED_REGION) when the attachments have been rezzed in the new region.  This cannot currently
                 // be done in AttachmentsModule.CopyAttachments(AgentData ad, IScenePresence sp) itself since we are
                 // not transporting the required data.
-                lock (m_attachments)
-                {
-                    if (HasAttachments())
-                    {
-                        m_log.DebugFormat(
-                            "[SCENE PRESENCE]: Restarting scripts in attachments for {0} in {1}", Name, Scene.Name);
+                //
+                // We must take a copy of the attachments list here (rather than locking) to avoid a deadlock where a script in one of 
+                // the attachments may start processing an event (which locks ScriptInstance.m_Script) that then calls a method here
+                // which needs to lock m_attachments.  ResumeScripts() needs to take a ScriptInstance.m_Script lock to try to unset the Suspend status.
+                //
+                // FIXME: In theory, this deadlock should not arise since scripts should not be processing events until ResumeScripts().
+                // But XEngine starts all scripts unsuspended.  Starting them suspended will not currently work because script rezzing
+                // is placed in an asynchronous queue in XEngine and so the ResumeScripts() call will almost certainly execute before the 
+                // script is rezzed.  This means the ResumeScripts() does absolutely nothing when using XEngine.
+                List<SceneObjectGroup> attachments = GetAttachments();
 
-                        // Resume scripts
-                        foreach (SceneObjectGroup sog in m_attachments)
-                        {
-                            sog.RootPart.ParentGroup.CreateScriptInstances(0, false, m_scene.DefaultScriptEngine, GetStateSource());
-                            sog.ResumeScripts();
-                        }
+                if (attachments.Count > 0)
+                {
+                    m_log.DebugFormat(
+                        "[SCENE PRESENCE]: Restarting scripts in attachments for {0} in {1}", Name, Scene.Name);
+
+                    // Resume scripts
+                    foreach (SceneObjectGroup sog in attachments)
+                    {
+                        sog.RootPart.ParentGroup.CreateScriptInstances(0, false, m_scene.DefaultScriptEngine, GetStateSource());
+                        sog.ResumeScripts();
                     }
                 }
             }
@@ -1001,6 +1028,7 @@ namespace OpenSim.Region.Framework.Scenes
             MovementFlag = 0;
 
             m_scene.EventManager.TriggerOnMakeRootAgent(this);
+
         }
 
         public int GetStateSource()
@@ -1112,7 +1140,26 @@ namespace OpenSim.Region.Framework.Scenes
 
         public void StopFlying()
         {
-            ControllingClient.StopFlying(this);
+            Vector3 pos = AbsolutePosition; 
+            if (Appearance.AvatarHeight != 127.0f)
+                pos += new Vector3(0f, 0f, (Appearance.AvatarHeight / 6f));
+            else
+                pos += new Vector3(0f, 0f, (1.56f / 6f));
+
+            AbsolutePosition = pos;
+
+            // attach a suitable collision plane regardless of the actual situation to force the LLClient to land.
+            // Collision plane below the avatar's position a 6th of the avatar's height is suitable.
+            // Mind you, that this method doesn't get called if the avatar's velocity magnitude is greater then a
+            // certain amount..   because the LLClient wouldn't land in that situation anyway.
+
+            // why are we still testing for this really old height value default???
+            if (Appearance.AvatarHeight != 127.0f)
+                CollisionPlane = new Vector4(0, 0, 0, pos.Z - Appearance.AvatarHeight / 6f);
+            else
+                CollisionPlane = new Vector4(0, 0, 0, pos.Z - (1.56f / 6f));
+
+            ControllingClient.SendAgentTerseUpdate(this);
         }
 
         /// <summary>
@@ -1279,6 +1326,26 @@ namespace OpenSim.Region.Framework.Scenes
                 PhysicsActor.Size = new Vector3(0.45f, 0.6f, height);
         }
 
+        private bool WaitForUpdateAgent(IClientAPI client)
+        {
+            // Before UpdateAgent, m_originRegionID is UUID.Zero; after, it's non-Zero
+            int count = 20;
+            while (m_originRegionID.Equals(UUID.Zero) && count-- > 0)
+            {
+                m_log.DebugFormat("[SCENE PRESENCE]: Agent {0} waiting for update in {1}", client.Name, Scene.Name);
+                Thread.Sleep(200);
+            }
+
+            if (m_originRegionID.Equals(UUID.Zero))
+            {
+                // Movement into region will fail
+                m_log.WarnFormat("[SCENE PRESENCE]: Update agent {0} never arrived in {1}", client.Name, Scene.Name);
+                return false;
+            }
+
+            return true;
+        }
+
         /// <summary>
         /// Complete Avatar's movement into the region.
         /// </summary>
@@ -1295,6 +1362,15 @@ namespace OpenSim.Region.Framework.Scenes
             m_log.DebugFormat(
                 "[SCENE PRESENCE]: Completing movement of {0} into region {1} in position {2}",
                 client.Name, Scene.RegionInfo.RegionName, AbsolutePosition);
+
+            // Make sure it's not a login agent. We don't want to wait for updates during login
+            if (PresenceType != PresenceType.Npc && (m_teleportFlags & TeleportFlags.ViaLogin) == 0)
+            {
+                // Let's wait until UpdateAgent (called by departing region) is done
+                if (!WaitForUpdateAgent(client))
+                    // The sending region never sent the UpdateAgent data, we have to refuse
+                    return;
+            }
 
             Vector3 look = Velocity;
 
@@ -1316,11 +1392,17 @@ namespace OpenSim.Region.Framework.Scenes
 
             bool flying = ((m_AgentControlFlags & AgentManager.ControlFlags.AGENT_CONTROL_FLY) != 0);
             MakeRootAgent(AbsolutePosition, flying);
+
+            // Tell the client that we're totally ready
             ControllingClient.MoveAgentIntoRegion(m_scene.RegionInfo, AbsolutePosition, look);
+
+            // Remember in HandleUseCircuitCode, we delayed this to here
+            if (m_teleportFlags > 0)
+                SendInitialDataToMe();
 
 //            m_log.DebugFormat("[SCENE PRESENCE] Completed movement");
 
-            if ((m_callbackURI != null) && !m_callbackURI.Equals(""))
+            if (!string.IsNullOrEmpty(m_callbackURI))
             {
                 // We cannot sleep here since this would hold up the inbound packet processing thread, as
                 // CompleteMovement() is executed synchronously.  However, it might be better to delay the release
@@ -1348,7 +1430,6 @@ namespace OpenSim.Region.Framework.Scenes
             // Create child agents in neighbouring regions
             if (openChildAgents && !IsChildAgent)
             {
-                SendInitialDataToMe();
                 IEntityTransferModule m_agentTransfer = m_scene.RequestModuleInterface<IEntityTransferModule>();
                 if (m_agentTransfer != null)
                     Util.FireAndForget(delegate { m_agentTransfer.EnableChildAgents(this); });
@@ -1370,6 +1451,7 @@ namespace OpenSim.Region.Framework.Scenes
 //            m_log.DebugFormat(
 //                "[SCENE PRESENCE]: Completing movement of {0} into region {1} took {2}ms", 
 //                client.Name, Scene.RegionInfo.RegionName, (DateTime.Now - startTime).Milliseconds);
+
         }
 
         /// <summary>
@@ -1417,19 +1499,15 @@ namespace OpenSim.Region.Framework.Scenes
         /// </summary>
         public void HandleAgentUpdate(IClientAPI remoteClient, AgentUpdateArgs agentData)
         {
-//            m_log.DebugFormat(
-//                "[SCENE PRESENCE]: In {0} received agent update from {1}, flags {2}",
-//                Scene.RegionInfo.RegionName, remoteClient.Name, (AgentManager.ControlFlags)agentData.ControlFlags);
+            //m_log.DebugFormat(
+            //    "[SCENE PRESENCE]: In {0} received agent update from {1}, flags {2}",
+            //    Scene.RegionInfo.RegionName, remoteClient.Name, (AgentManager.ControlFlags)agentData.ControlFlags);
 
             if (IsChildAgent)
             {
             //    // m_log.Debug("DEBUG: HandleAgentUpdate: child agent");
                 return;
             }
-
-            ++m_movementUpdateCount;
-            if (m_movementUpdateCount < 1)
-                m_movementUpdateCount = 1;
 
             #region Sanity Checking
 
@@ -1461,33 +1539,12 @@ namespace OpenSim.Region.Framework.Scenes
 
             AgentManager.ControlFlags flags = (AgentManager.ControlFlags)agentData.ControlFlags;
 
-            // Camera location in world.  We'll need to raytrace
-            // from this location from time to time.
-            CameraPosition = agentData.CameraCenter;
-            if (Vector3.Distance(m_lastCameraPosition, CameraPosition) >= Scene.RootReprioritizationDistance)
-            {
-                ReprioritizeUpdates();
-                m_lastCameraPosition = CameraPosition;
-            }
-
-            // Use these three vectors to figure out what the agent is looking at
-            // Convert it to a Matrix and/or Quaternion
-            CameraAtAxis = agentData.CameraAtAxis;
-            CameraLeftAxis = agentData.CameraLeftAxis;
-            CameraUpAxis = agentData.CameraUpAxis;
-
             // The Agent's Draw distance setting
             // When we get to the point of re-computing neighbors everytime this
             // changes, then start using the agent's drawdistance rather than the 
             // region's draw distance.
             // DrawDistance = agentData.Far;
             DrawDistance = Scene.DefaultDrawDistance;
-
-            // Check if Client has camera in 'follow cam' or 'build' mode.
-            Vector3 camdif = (Vector3.One * Rotation - Vector3.One * CameraRotation);
-
-            m_followCamAuto = ((CameraUpAxis.Z > 0.959f && CameraUpAxis.Z < 0.98f)
-               && (Math.Abs(camdif.X) < 0.4f && Math.Abs(camdif.Y) < 0.4f)) ? true : false;
 
             m_mouseLook = (flags & AgentManager.ControlFlags.AGENT_CONTROL_MOUSELOOK) != 0;
             m_leftButtonDown = (flags & AgentManager.ControlFlags.AGENT_CONTROL_LBUTTON_DOWN) != 0;
@@ -1508,17 +1565,6 @@ namespace OpenSim.Region.Framework.Scenes
                 StandUp();
             }
 
-            //m_log.DebugFormat("[FollowCam]: {0}", m_followCamAuto);
-            // Raycast from the avatar's head to the camera to see if there's anything blocking the view
-            if ((m_movementUpdateCount % NumMovementsBetweenRayCast) == 0 && m_scene.PhysicsScene.SupportsRayCast())
-            {
-                if (m_followCamAuto)
-                {
-                    Vector3 posAdjusted = m_pos + HEAD_ADJUSTMENT;
-                    m_scene.PhysicsScene.RaycastWorld(m_pos, Vector3.Normalize(CameraPosition - posAdjusted), Vector3.Distance(CameraPosition, posAdjusted) + 0.3f, RayCastCameraCallback);
-                }
-            }
-
             uint flagsForScripts = (uint)flags;
             flags = RemoveIgnoredControls(flags, IgnoredControls);
 
@@ -1529,7 +1575,13 @@ namespace OpenSim.Region.Framework.Scenes
             // Here's where you get them.
             m_AgentControlFlags = flags;
             m_headrotation = agentData.HeadRotation;
+            byte oldState = State;
             State = agentData.State;
+
+            // We need to send this back to the client in order to stop the edit beams
+            if ((oldState & (uint)AgentState.Editing) != 0 && State == (uint)AgentState.None)
+                ControllingClient.SendAgentTerseUpdate(this);
+
 
             PhysicsActor actor = PhysicsActor;
             if (actor == null)
@@ -1742,10 +1794,79 @@ namespace OpenSim.Region.Framework.Scenes
                 SendControlsToScripts(flagsForScripts);
             }
 
+            // We need to send this back to the client in order to see the edit beams
+            if ((State & (uint)AgentState.Editing) != 0)
+                ControllingClient.SendAgentTerseUpdate(this);
+
             m_scene.EventManager.TriggerOnClientMovement(this);
-            TriggerScenePresenceUpdated();
         }
 
+
+        /// <summary>
+        /// This is the event handler for client cameras. If a client is moving, or moving the camera, this event is triggering.
+        /// </summary>
+        private void HandleAgentCamerasUpdate(IClientAPI remoteClient, AgentUpdateArgs agentData)
+        {
+            //m_log.DebugFormat(
+            //    "[SCENE PRESENCE]: In {0} received agent camera update from {1}, flags {2}",
+            //    Scene.RegionInfo.RegionName, remoteClient.Name, (AgentManager.ControlFlags)agentData.ControlFlags);
+
+            if (IsChildAgent)
+            {
+                //    // m_log.Debug("DEBUG: HandleAgentUpdate: child agent");
+                return;
+            }
+
+            ++m_movementUpdateCount;
+            if (m_movementUpdateCount < 1)
+                m_movementUpdateCount = 1;
+
+
+            AgentManager.ControlFlags flags = (AgentManager.ControlFlags)agentData.ControlFlags;
+
+            // Camera location in world.  We'll need to raytrace
+            // from this location from time to time.
+            CameraPosition = agentData.CameraCenter;
+            if (Vector3.Distance(m_lastCameraPosition, CameraPosition) >= Scene.RootReprioritizationDistance)
+            {
+                ReprioritizeUpdates();
+                m_lastCameraPosition = CameraPosition;
+            }
+
+            // Use these three vectors to figure out what the agent is looking at
+            // Convert it to a Matrix and/or Quaternion
+            CameraAtAxis = agentData.CameraAtAxis;
+            CameraLeftAxis = agentData.CameraLeftAxis;
+            CameraUpAxis = agentData.CameraUpAxis;
+
+            // The Agent's Draw distance setting
+            // When we get to the point of re-computing neighbors everytime this
+            // changes, then start using the agent's drawdistance rather than the 
+            // region's draw distance.
+            // DrawDistance = agentData.Far;
+            DrawDistance = Scene.DefaultDrawDistance;
+
+            // Check if Client has camera in 'follow cam' or 'build' mode.
+            Vector3 camdif = (Vector3.One * Rotation - Vector3.One * CameraRotation);
+
+            m_followCamAuto = ((CameraUpAxis.Z > 0.959f && CameraUpAxis.Z < 0.98f)
+               && (Math.Abs(camdif.X) < 0.4f && Math.Abs(camdif.Y) < 0.4f)) ? true : false;
+
+
+            //m_log.DebugFormat("[FollowCam]: {0}", m_followCamAuto);
+            // Raycast from the avatar's head to the camera to see if there's anything blocking the view
+            if ((m_movementUpdateCount % NumMovementsBetweenRayCast) == 0 && m_scene.PhysicsScene.SupportsRayCast())
+            {
+                if (m_followCamAuto)
+                {
+                    Vector3 posAdjusted = m_pos + HEAD_ADJUSTMENT;
+                    m_scene.PhysicsScene.RaycastWorld(m_pos, Vector3.Normalize(CameraPosition - posAdjusted), Vector3.Distance(CameraPosition, posAdjusted) + 0.3f, RayCastCameraCallback);
+                }
+            }
+
+            TriggerScenePresenceUpdated();
+        }
+        
         /// <summary>
         /// Calculate an update to move the presence to the set target.
         /// </summary>
@@ -2037,6 +2158,7 @@ namespace OpenSim.Region.Framework.Scenes
             }
 
             Animator.TrySetMovementAnimation("STAND");
+            TriggerScenePresenceUpdated();
         }
 
         private SceneObjectPart FindNextAvailableSitTarget(UUID targetID)
@@ -2136,9 +2258,9 @@ namespace OpenSim.Region.Framework.Scenes
                 forceMouselook = part.GetForceMouselook();
 
                 ControllingClient.SendSitResponse(
-                    targetID, offset, sitOrientation, false, cameraAtOffset, cameraEyeOffset, forceMouselook);
+                    part.UUID, offset, sitOrientation, false, cameraAtOffset, cameraEyeOffset, forceMouselook);
 
-                m_requestedSitTargetUUID = targetID;
+                m_requestedSitTargetUUID = part.UUID;
 
                 HandleAgentSit(ControllingClient, UUID);
 
@@ -2163,7 +2285,7 @@ namespace OpenSim.Region.Framework.Scenes
             if (part != null)
             {
                 m_requestedSitTargetID = part.LocalId;
-                m_requestedSitTargetUUID = targetID;
+                m_requestedSitTargetUUID = part.UUID;
 
 //                m_log.DebugFormat("[SIT]: Client requested Sit Position: {0}", offset);
 
@@ -2430,6 +2552,7 @@ namespace OpenSim.Region.Framework.Scenes
                 }
                 Animator.TrySetMovementAnimation(sitAnimation);
                 SendAvatarDataToAllAgents();
+                TriggerScenePresenceUpdated();
             }
         }
 
@@ -2438,6 +2561,7 @@ namespace OpenSim.Region.Framework.Scenes
 //            m_updateCount = 0;  // Kill animation update burst so that the SIT_G.. will stick..
             m_AngularVelocity = Vector3.Zero;
             Animator.TrySetMovementAnimation("SIT_GROUND_CONSTRAINED");
+            TriggerScenePresenceUpdated();
             SitGround = true;
             RemoveFromPhysicalScene();
         }
@@ -2454,11 +2578,13 @@ namespace OpenSim.Region.Framework.Scenes
         public void HandleStartAnim(IClientAPI remoteClient, UUID animID)
         {
             Animator.AddAnimation(animID, UUID.Zero);
+            TriggerScenePresenceUpdated();
         }
 
         public void HandleStopAnim(IClientAPI remoteClient, UUID animID)
         {
             Animator.RemoveAnimation(animID, false);
+            TriggerScenePresenceUpdated();
         }
 
         /// <summary>
@@ -2672,11 +2798,12 @@ namespace OpenSim.Region.Framework.Scenes
                 SendOtherAgentsAppearanceToMe();
 
                 EntityBase[] entities = Scene.Entities.GetEntities();
-                foreach(EntityBase e in entities)
+                foreach (EntityBase e in entities)
                 {
                     if (e != null && e is SceneObjectGroup)
                         ((SceneObjectGroup)e).SendFullUpdateToClient(ControllingClient);
                 }
+
             });
         }
 
@@ -2711,7 +2838,9 @@ namespace OpenSim.Region.Framework.Scenes
             // again here... this comes after the cached appearance check because the avatars
             // appearance goes into the avatar update packet
             SendAvatarDataToAllAgents();
-            SendAppearanceToAgent(this);
+
+            // This invocation always shows up in the viewer logs as an error.
+            // SendAppearanceToAgent(this);
 
             // If we are using the the cached appearance then send it out to everyone
             if (cachedappearance)
@@ -2867,8 +2996,7 @@ namespace OpenSim.Region.Framework.Scenes
             }
 
             // Minimum Draw distance is 64 meters, the Radius of the draw distance sphere is 32m
-            if (Util.GetDistanceTo(AbsolutePosition, m_lastChildAgentUpdatePosition) >= Scene.ChildReprioritizationDistance ||
-                Util.GetDistanceTo(CameraPosition, m_lastChildAgentUpdateCamPosition) >= Scene.ChildReprioritizationDistance)
+            if (Util.GetDistanceTo(AbsolutePosition, m_lastChildAgentUpdatePosition) >= Scene.ChildReprioritizationDistance)
             {
                 m_lastChildAgentUpdatePosition = AbsolutePosition;
                 m_lastChildAgentUpdateCamPosition = CameraPosition;
@@ -2898,7 +3026,7 @@ namespace OpenSim.Region.Framework.Scenes
                 cadu.Velocity = Velocity;
 
                 AgentPosition agentpos = new AgentPosition();
-                agentpos.CopyFrom(cadu);
+                agentpos.CopyFrom(cadu, ControllingClient.SessionId);
 
                 // Let's get this out of the update loop
                 Util.FireAndForget(delegate { m_scene.SendOutChildAgentUpdates(agentpos, this); });
@@ -3136,7 +3264,11 @@ namespace OpenSim.Region.Framework.Scenes
             {
                 m_log.Debug("[SCENE PRESENCE]: Closing " + byebyeRegions.Count + " child agents");
 
-                m_scene.SceneGridService.SendCloseChildAgentConnections(ControllingClient.AgentId, byebyeRegions); 
+                AgentCircuitData acd = Scene.AuthenticateHandler.GetAgentCircuitData(UUID);
+                string auth = string.Empty;
+                if (acd != null)
+                    auth = acd.SessionID.ToString();
+                m_scene.SceneGridService.SendCloseChildAgentConnections(ControllingClient.AgentId, auth, byebyeRegions); 
             }
             
             foreach (ulong handle in byebyeRegions)
@@ -3233,6 +3365,7 @@ namespace OpenSim.Region.Framework.Scenes
 
             cAgent.AgentID = UUID;
             cAgent.RegionID = Scene.RegionInfo.RegionID;
+            cAgent.SessionID = ControllingClient.SessionId;
 
             cAgent.Position = AbsolutePosition;
             cAgent.Velocity = m_velocity;
@@ -3461,7 +3594,8 @@ namespace OpenSim.Region.Framework.Scenes
 
 //                if (m_updateCount > 0)
 //                {
-            Animator.UpdateMovementAnimations();
+            if (Animator.UpdateMovementAnimations())
+                TriggerScenePresenceUpdated();
 //                    m_updateCount--;
 //                }
 

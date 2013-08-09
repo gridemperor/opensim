@@ -260,7 +260,7 @@ namespace OpenSim.Region.CoreModules.Framework.InventoryAccess
                         return UUID.Zero;
                     }
 
-                    remoteClient.SendAgentAlertMessage("Notecard saved", false);
+                    remoteClient.SendAlertMessage("Notecard saved");
                 }
                 else if ((InventoryType)item.InvType == InventoryType.LSL)
                 {
@@ -270,7 +270,7 @@ namespace OpenSim.Region.CoreModules.Framework.InventoryAccess
                         return UUID.Zero;
                     }
 
-                    remoteClient.SendAgentAlertMessage("Script saved", false);
+                    remoteClient.SendAlertMessage("Script saved");
                 }
 
                 AssetBase asset =
@@ -357,6 +357,9 @@ namespace OpenSim.Region.CoreModules.Framework.InventoryAccess
 
             foreach (SceneObjectGroup objectGroup in objlist)
             {
+                if (objectGroup.RootPart.KeyframeMotion != null)
+                    objectGroup.RootPart.KeyframeMotion.Stop();
+                objectGroup.RootPart.KeyframeMotion = null;
 //                Vector3 inventoryStoredPosition = new Vector3
 //                            (((objectGroup.AbsolutePosition.X > (int)Constants.RegionSize)
 //                                  ? 250
@@ -768,7 +771,7 @@ namespace OpenSim.Region.CoreModules.Framework.InventoryAccess
                 SceneObjectGroup g = SceneObjectSerializer.FromOriginalXmlFormat(xmlData);
 
                 objlist.Add(g);
-                veclist.Add(new Vector3(0, 0, 0));
+                veclist.Add(Vector3.Zero);
 
                 float offsetHeight = 0;
                 pos = m_Scene.GetNewRezLocation(

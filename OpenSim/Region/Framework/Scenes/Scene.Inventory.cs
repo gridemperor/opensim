@@ -139,7 +139,7 @@ namespace OpenSim.Region.Framework.Scenes
                 {
                     userlevel = 1;
                 }
-                EventManager.TriggerOnNewInventoryItemUploadComplete(item.Owner, item.AssetID, item.Name, userlevel);
+                EventManager.TriggerOnNewInventoryItemUploadComplete(item.Owner, (AssetType)item.AssetType, item.AssetID, item.Name, userlevel);
 
                 return true;
             }
@@ -178,7 +178,7 @@ namespace OpenSim.Region.Framework.Scenes
                 {
                     userlevel = 1;
                 }
-                EventManager.TriggerOnNewInventoryItemUploadComplete(item.Owner, item.AssetID, item.Name, userlevel);
+                EventManager.TriggerOnNewInventoryItemUploadComplete(item.Owner, (AssetType)item.AssetType, item.AssetID, item.Name, userlevel);
 
                 if (originalFolder != UUID.Zero)
                 {
@@ -326,7 +326,7 @@ namespace OpenSim.Region.Framework.Scenes
             // Update item with new asset
             item.AssetID = asset.FullID;
             if (group.UpdateInventoryItem(item))
-                remoteClient.SendAgentAlertMessage("Script saved", false);
+                remoteClient.SendAlertMessage("Script saved");
             
             part.SendPropertiesToClient(remoteClient);
 
@@ -342,7 +342,7 @@ namespace OpenSim.Region.Framework.Scenes
             }
             else
             {
-                remoteClient.SendAgentAlertMessage("Script saved", false);
+                remoteClient.SendAlertMessage("Script saved");
             }
 
             // Tell anyone managing scripts that a script has been reloaded/changed
@@ -555,6 +555,9 @@ namespace OpenSim.Region.Framework.Scenes
             UUID recipient, UUID senderId, UUID itemId, UUID recipientFolderId)
         {
             //Console.WriteLine("Scene.Inventory.cs: GiveInventoryItem");
+
+            if (!Permissions.CanTransferUserInventory(itemId, senderId, recipient))
+                return null;
 
             InventoryItemBase item = new InventoryItemBase(itemId, senderId);
             item = InventoryService.GetItem(item);
@@ -1616,11 +1619,11 @@ namespace OpenSim.Region.Framework.Scenes
                             remoteClient, part, transactionID, currentItem);
 
                         if ((InventoryType)itemInfo.InvType == InventoryType.Notecard)
-                            remoteClient.SendAgentAlertMessage("Notecard saved", false);
+                            remoteClient.SendAlertMessage("Notecard saved");
                         else if ((InventoryType)itemInfo.InvType == InventoryType.LSL)
-                            remoteClient.SendAgentAlertMessage("Script saved", false);
+                            remoteClient.SendAlertMessage("Script saved");
                         else
-                            remoteClient.SendAgentAlertMessage("Item saved", false);
+                            remoteClient.SendAlertMessage("Item saved");
                     }
 
                     // Base ALWAYS has move
@@ -2068,7 +2071,10 @@ namespace OpenSim.Region.Framework.Scenes
             {
                 // If we don't have permission, stop right here
                 if (!permissionToTakeCopy)
+                {
+                    remoteClient.SendAlertMessage("You don't have permission to take the object");
                     return;
+                }
 
                 permissionToTake = true;
                 // Don't delete

@@ -742,7 +742,7 @@ namespace OpenSim.Region.Framework.Scenes
         public event OnIncomingSceneObjectDelegate OnIncomingSceneObject;
         public delegate void OnIncomingSceneObjectDelegate(SceneObjectGroup so);
 
-        public delegate void NewInventoryItemUploadComplete(UUID avatarID, UUID assetID, string name, int userlevel);
+        public delegate void NewInventoryItemUploadComplete(UUID avatarID, AssetType type, UUID assetID, string name, int userlevel);
 
         public event NewInventoryItemUploadComplete OnNewInventoryItemUploadComplete;
 
@@ -969,6 +969,8 @@ namespace OpenSim.Region.Framework.Scenes
         public delegate void RegionStarted(Scene scene);
         public event RegionStarted OnRegionStarted;
 
+        public delegate void RegionHeartbeatStart(Scene scene);
+        public event RegionHeartbeatStart OnRegionHeartbeatStart;
         public delegate void RegionHeartbeatEnd(Scene scene);
         public event RegionHeartbeatEnd OnRegionHeartbeatEnd;
 
@@ -1018,6 +1020,16 @@ namespace OpenSim.Region.Framework.Scenes
         /// via <see cref="OpenSim.Region.CoreModules.Framework.EntityTransfer.EntityTransferModule.DoTeleport"/>
         /// </remarks>
         public event TeleportFail OnTeleportFail;
+
+//        public delegate void GatherUuids(SceneObjectPart sop, IDictionary<UUID, AssetType> assetUuids);
+//
+//        /// <summary>
+//        /// Triggered when UUIDs referenced by a scene object are being gathered for archiving, hg transfer, etc.
+//        /// </summary>
+//        /// <remarks>
+//        /// The listener should add references to the IDictionary<UUID, AssetType> as appropriate.
+//        /// </remarks>
+//        public event GatherUuids OnGatherUuids;
 
         public class MoneyTransferArgs : EventArgs
         {
@@ -2134,7 +2146,7 @@ namespace OpenSim.Region.Framework.Scenes
             }
         }
 
-        public void TriggerOnNewInventoryItemUploadComplete(UUID agentID, UUID AssetID, String AssetName, int userlevel)
+        public void TriggerOnNewInventoryItemUploadComplete(UUID agentID, AssetType type, UUID AssetID, String AssetName, int userlevel)
         {
             NewInventoryItemUploadComplete handlerNewInventoryItemUpdateComplete = OnNewInventoryItemUploadComplete;
             if (handlerNewInventoryItemUpdateComplete != null)
@@ -2143,7 +2155,7 @@ namespace OpenSim.Region.Framework.Scenes
                 {
                     try
                     {
-                        d(agentID, AssetID, AssetName, userlevel);
+                        d(agentID, type, AssetID, AssetName, userlevel);
                     }
                     catch (Exception e)
                     {
@@ -3068,6 +3080,27 @@ namespace OpenSim.Region.Framework.Scenes
             }
         }
 
+        public void TriggerRegionHeartbeatStart(Scene scene)
+        {
+            RegionHeartbeatStart handler = OnRegionHeartbeatStart;
+
+            if (handler != null)
+            {
+                foreach (RegionHeartbeatStart d in handler.GetInvocationList())
+                {
+                    try
+                    {
+                        d(scene);
+                    }
+                    catch (Exception e)
+                    {
+                        m_log.ErrorFormat("[EVENT MANAGER]: Delegate for OnRegionHeartbeatStart failed - continuing {0} - {1}",
+                            e.Message, e.StackTrace);
+                    }
+                }
+            }
+        }
+
         public void TriggerRegionHeartbeatEnd(Scene scene)
         {
             RegionHeartbeatEnd handler = OnRegionHeartbeatEnd;
@@ -3214,5 +3247,26 @@ namespace OpenSim.Region.Framework.Scenes
                 }
             }
         }
+
+//        public void TriggerGatherUuids(SceneObjectPart sop, IDictionary<UUID, AssetType> assetUuids)
+//        {
+//            GatherUuids handler = OnGatherUuids;
+//
+//            if (handler != null)
+//            {
+//                foreach (GatherUuids d in handler.GetInvocationList())
+//                {
+//                    try
+//                    {
+//                        d(sop, assetUuids);
+//                    }
+//                    catch (Exception e)
+//                    {
+//                        m_log.ErrorFormat("[EVENT MANAGER]: Delegate for TriggerUuidGather failed - continuing {0} - {1}",
+//                            e.Message, e.StackTrace);
+//                    }
+//                }
+//            }
+//        }
     }
 }

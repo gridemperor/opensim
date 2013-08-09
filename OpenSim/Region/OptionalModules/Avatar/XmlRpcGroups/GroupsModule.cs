@@ -250,7 +250,6 @@ namespace OpenSim.Region.OptionalModules.Avatar.XmlRpcGroups
 
             client.OnUUIDGroupNameRequest += HandleUUIDGroupNameRequest;
             client.OnAgentDataUpdateRequest += OnAgentDataUpdateRequest;
-            client.OnDirFindQuery += OnDirFindQuery;
             client.OnRequestAvatarProperties += OnRequestAvatarProperties;
 
             // Used for Notices and Group Invites/Accept/Reject
@@ -302,21 +301,6 @@ namespace OpenSim.Region.OptionalModules.Avatar.XmlRpcGroups
             }
         }
         */
-
-        void OnDirFindQuery(IClientAPI remoteClient, UUID queryID, string queryText, uint queryFlags, int queryStart)
-        {
-            if (((DirFindFlags)queryFlags & DirFindFlags.Groups) == DirFindFlags.Groups)
-            {
-                if (m_debugEnabled) 
-                    m_log.DebugFormat(
-                        "[GROUPS]: {0} called with queryText({1}) queryFlags({2}) queryStart({3})", 
-                        System.Reflection.MethodBase.GetCurrentMethod().Name, queryText, (DirFindFlags)queryFlags, queryStart);
-
-                // TODO: This currently ignores pretty much all the query flags including Mature and sort order
-                remoteClient.SendDirGroupsReply(queryID, m_groupData.FindGroups(GetRequestingAgentID(remoteClient), queryText).ToArray());
-            }
-            
-        }
 
         private void OnAgentDataUpdateRequest(IClientAPI remoteClient, UUID dataForAgentID, UUID sessionID)
         {
@@ -764,7 +748,7 @@ namespace OpenSim.Region.OptionalModules.Avatar.XmlRpcGroups
                     remoteClient.SendCreateGroupReply(UUID.Zero, false, "You have got insufficient funds to create a group.");
                     return UUID.Zero;
                 }
-                money.ApplyCharge(GetRequestingAgentID(remoteClient), money.GroupCreationCharge, "Group Creation");
+                money.ApplyCharge(GetRequestingAgentID(remoteClient), money.GroupCreationCharge, MoneyTransactionType.GroupCreate);
             }
             UUID groupID = m_groupData.CreateGroup(GetRequestingAgentID(remoteClient), name, charter, showInList, insigniaID, membershipFee, openEnrollment, allowPublish, maturePublish, GetRequestingAgentID(remoteClient));
 
@@ -1177,6 +1161,12 @@ namespace OpenSim.Region.OptionalModules.Avatar.XmlRpcGroups
                 }
             }
         }
+
+        public List<DirGroupsReplyData> FindGroups(IClientAPI remoteClient, string query)
+        {
+            return m_groupData.FindGroups(GetRequestingAgentID(remoteClient), query);
+        }
+
 
         #endregion
 

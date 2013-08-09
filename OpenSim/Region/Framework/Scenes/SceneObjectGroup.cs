@@ -455,6 +455,9 @@ namespace OpenSim.Region.Framework.Scenes
                             || Scene.TestBorderCross(val, Cardinals.S))
                         && !IsAttachmentCheckFull() && (!Scene.LoadingPrims))
                     {
+                        if (m_rootPart.KeyframeMotion != null)
+                            m_rootPart.KeyframeMotion.StartCrossingCheck();
+
                         m_scene.CrossPrimGroupIntoNewRegion(val, this, true);
                     }
                 }
@@ -578,6 +581,8 @@ namespace OpenSim.Region.Framework.Scenes
                             childPa.Selected = value;
                     }
                 }
+                if (RootPart.KeyframeMotion != null)
+                    RootPart.KeyframeMotion.Selected = value;
             }
         }
 
@@ -758,6 +763,11 @@ namespace OpenSim.Region.Framework.Scenes
             for (int i = 0; i < parts.Length; i++)
             {
                 SceneObjectPart part = parts[i];
+                if (part.KeyframeMotion != null)
+                {
+                    part.KeyframeMotion.UpdateSceneObject(this);
+                }
+
                 if (Object.ReferenceEquals(part, m_rootPart))
                     continue;
 
@@ -1499,7 +1509,7 @@ namespace OpenSim.Region.Framework.Scenes
             if (!userExposed)
                 dupe.IsAttachment = true;
 
-            dupe.AbsolutePosition = new Vector3(AbsolutePosition.X, AbsolutePosition.Y, AbsolutePosition.Z);
+            dupe.m_sittingAvatars = new List<UUID>();
 
             if (!userExposed)
             {
@@ -1551,6 +1561,8 @@ namespace OpenSim.Region.Framework.Scenes
     
                     newPart.DoPhysicsPropertyUpdate(originalPartPa.IsPhysical, true);
                 }
+                if (part.KeyframeMotion != null)
+                    newPart.KeyframeMotion = part.KeyframeMotion.Copy(dupe);
             }
             
             if (userExposed)
@@ -1578,6 +1590,12 @@ namespace OpenSim.Region.Framework.Scenes
 
         public void ScriptSetPhysicsStatus(bool usePhysics)
         {
+            if (usePhysics)
+            {
+                if (RootPart.KeyframeMotion != null)
+                    RootPart.KeyframeMotion.Stop();
+                RootPart.KeyframeMotion = null;
+            }
             UpdatePrimFlags(RootPart.LocalId, usePhysics, IsTemporary, IsPhantom, IsVolumeDetect);
         }
 
@@ -2681,8 +2699,8 @@ namespace OpenSim.Region.Framework.Scenes
                     part.ClonePermissions(RootPart);
             });
 
-            uint lockMask = ~(uint)PermissionMask.Move;
-            uint lockBit = RootPart.OwnerMask & (uint)PermissionMask.Move;
+            uint lockMask = ~(uint)(PermissionMask.Move | PermissionMask.Modify);
+            uint lockBit = RootPart.OwnerMask & (uint)(PermissionMask.Move | PermissionMask.Modify);
             RootPart.OwnerMask = (RootPart.OwnerMask & lockBit) | ((newOwnerMask | foldedPerms) & lockMask);
             RootPart.ScheduleFullUpdate();
         }
@@ -3010,8 +3028,8 @@ namespace OpenSim.Region.Framework.Scenes
         /// <summary>
         /// Update just the root prim position in a linkset
         /// </summary>
-        /// <param name="pos"></param>
-        public void UpdateRootPosition(Vector3 pos)
+        /// <param name="newPos"></param>
+        public void UpdateRootPosition(Vector3 newPos)
         {
 //            m_log.DebugFormat(
 //                "[SCENE OBJECT GROUP]: Updating root position of {0} {1} to {2}", Name, LocalId, pos);
@@ -3020,16 +3038,19 @@ namespace OpenSim.Region.Framework.Scenes
 //            for (int i = 0; i < parts.Length; i++)
 //                parts[i].StoreUndoState();
 
-            Vector3 newPos = new Vector3(pos.X, pos.Y, pos.Z);
-            Vector3 oldPos =
-                new Vector3(AbsolutePosition.X + m_rootPart.OffsetPosition.X,
-                              AbsolutePosition.Y + m_rootPart.OffsetPosition.Y,
-                              AbsolutePosition.Z + m_rootPart.OffsetPosition.Z);
+            Vector3 oldPos;
+
+            // FIXME: This improves the situation where editing just the root prim of an attached object would send
+            // all the other parts to oblivion after detach/reattach.  However, a problem remains since the root prim
+            // still ends up in the wrong position on reattach.
+            if (IsAttachment)
+                oldPos = RootPart.OffsetPosition;
+            else
+                oldPos = AbsolutePosition + RootPart.OffsetPosition;
+
             Vector3 diff = oldPos - newPos;
-            Vector3 axDiff = new Vector3(diff.X, diff.Y, diff.Z);
             Quaternion partRotation = m_rootPart.RotationOffset;
-            axDiff *= Quaternion.Inverse(partRotation);
-            diff = axDiff;
+            diff *= Quaternion.Inverse(partRotation);
 
             SceneObjectPart[] parts = m_parts.GetArray();
             for (int i = 0; i < parts.Length; i++)

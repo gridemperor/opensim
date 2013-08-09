@@ -86,6 +86,7 @@ namespace OpenSim
             IConfig startupConfig = Config.Configs["Startup"];
             IConfig networkConfig = Config.Configs["Network"];
 
+            int stpMinThreads = 2;
             int stpMaxThreads = 15;
 
             if (startupConfig != null)
@@ -112,12 +113,13 @@ namespace OpenSim
                 if (!String.IsNullOrEmpty(asyncCallMethodStr) && Utils.EnumTryParse<FireAndForgetMethod>(asyncCallMethodStr, out asyncCallMethod))
                     Util.FireAndForgetMethod = asyncCallMethod;
 
+                stpMinThreads = startupConfig.GetInt("MinPoolThreads", 15);
                 stpMaxThreads = startupConfig.GetInt("MaxPoolThreads", 15);
                 m_consolePrompt = startupConfig.GetString("ConsolePrompt", @"Region (\R) ");
             }
 
             if (Util.FireAndForgetMethod == FireAndForgetMethod.SmartThreadPool)
-                Util.InitThreadPool(stpMaxThreads);
+                Util.InitThreadPool(stpMinThreads, stpMaxThreads);
 
             m_log.Info("[OPENSIM MAIN]: Using async_call_method " + Util.FireAndForgetMethod);
         }
@@ -225,18 +227,6 @@ namespace OpenSim
                                           "force update",
                                           "Force the update of all objects on clients",
                                           HandleForceUpdate);
-
-            m_console.Commands.AddCommand("Debug", false, "debug packet",
-                                          "debug packet <level> [<avatar-first-name> <avatar-last-name>]",
-                                          "Turn on packet debugging",
-                                            "If level >  255 then all incoming and outgoing packets are logged.\n"
-                                          + "If level <= 255 then incoming AgentUpdate and outgoing SimStats and SimulatorViewerTimeMessage packets are not logged.\n"
-                                          + "If level <= 200 then incoming RequestImage and outgoing ImagePacket, ImageData, LayerData and CoarseLocationUpdate packets are not logged.\n"
-                                          + "If level <= 100 then incoming ViewerEffect and AgentAnimation and outgoing ViewerEffect and AvatarAnimation packets are not logged.\n"
-                                          + "If level <=  50 then outgoing ImprovedTerseObjectUpdate packets are not logged.\n"
-                                          + "If level <= 0 then no packets are logged.\n"
-                                          + "If an avatar name is given then only packets from that avatar are logged",
-                                          Debug);
 
             m_console.Commands.AddCommand("General", false, "change region",
                                           "change region <region name>",
@@ -358,21 +348,9 @@ namespace OpenSim
             m_console.Commands.AddCommand("Regions", false, "delete-region",
                                           "delete-region <name>",
                                           "Delete a region from disk", RunCommand);
-
-            m_console.Commands.AddCommand("General", false, "modules list",
-                                          "modules list",
-                                          "List modules", HandleModules);
-
-            m_console.Commands.AddCommand("General", false, "modules load",
-                                          "modules load <name>",
-                                          "Load a module", HandleModules);
-
-            m_console.Commands.AddCommand("General", false, "modules unload",
-                                          "modules unload <name>",
-                                          "Unload a module", HandleModules);
         }
 
-        public override void ShutdownSpecific()
+        protected override void ShutdownSpecific()
         {
             if (m_shutdownCommandsFile != String.Empty)
             {
@@ -435,8 +413,8 @@ namespace OpenSim
             {
                 RegionInfo regionInfo = presence.Scene.RegionInfo;
 
-                if (presence.Firstname.ToLower().Contains(mainParams[2].ToLower()) &&
-                    presence.Lastname.ToLower().Contains(mainParams[3].ToLower()))
+                if (presence.Firstname.ToLower().Equals(mainParams[2].ToLower()) &&
+                    presence.Lastname.ToLower().Equals(mainParams[3].ToLower()))
                 {
                     MainConsole.Instance.Output(
                         String.Format(
@@ -450,6 +428,7 @@ namespace OpenSim
                         presence.ControllingClient.Kick("\nThe OpenSim manager kicked you out.\n");
 
                     presence.Scene.IncomingCloseAgent(presence.UUID, force);
+                    break;
                 }
             }
 
@@ -566,34 +545,6 @@ namespace OpenSim
         }
 
         /// <summary>
-        /// Load, Unload, and list Region modules in use
-        /// </summary>
-        /// <param name="module"></param>
-        /// <param name="cmd"></param>
-        private void HandleModules(string module, string[] cmd)
-        {
-            List<string> args = new List<string>(cmd);
-            args.RemoveAt(0);
-            string[] cmdparams = args.ToArray();
-
-            if (cmdparams.Length > 0)
-            {
-                switch (cmdparams[0].ToLower())
-                {
-                    case "list":
-                        //TODO: Convert to new region modules
-                        break;
-                    case "unload":
-                        //TODO: Convert to new region modules
-                        break;
-                    case "load":
-                        //TODO: Convert to new region modules
-                        break;
-                }
-            }
-        }
-
-        /// <summary>
         /// Runs commands issued by the server console from the operator
         /// </summary>
         /// <param name="command">The first argument of the parameter (the command)</param>
@@ -699,45 +650,6 @@ namespace OpenSim
                 SceneManager.TrySetCurrentScene(whichRegion.RegionName);
 
             RefreshPrompt();
-        }
-
-        /// <summary>
-        /// Turn on some debugging values for OpenSim.
-        /// </summary>
-        /// <param name="args"></param>
-        protected void Debug(string module, string[] args)
-        {
-            if (args.Length == 1)
-                return;
-
-            switch (args[1])
-            {
-                case "packet":
-                    string name = null;
-                    if (args.Length == 5)
-                        name = string.Format("{0} {1}", args[3], args[4]);
-
-                    if (args.Length > 2)
-                    {
-                        int newDebug;
-                        if (int.TryParse(args[2], out newDebug))
-                        {
-                            SceneManager.SetDebugPacketLevelOnCurrentScene(newDebug, name);
-                            // We provide user information elsewhere if any clients had their debug level set.
-//                            MainConsole.Instance.OutputFormat("Debug packet level set to {0}", newDebug);
-                        }
-                        else
-                        {
-                            MainConsole.Instance.Output("Usage: debug packet 0..255");
-                        }
-                    }
-
-                    break;
-
-                default:
-                    MainConsole.Instance.Output("Unknown debug command");
-                    break;
-            }
         }
 
         // see BaseOpenSimServer

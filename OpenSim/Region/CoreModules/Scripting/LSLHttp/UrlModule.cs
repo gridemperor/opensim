@@ -235,9 +235,10 @@ namespace OpenSim.Region.CoreModules.Scripting.LSLHttp
                 
                 string uri = "/lslhttp/" + urlcode.ToString() + "/";
                
-                m_HttpServer.AddPollServiceHTTPHandler(
-                    uri,
-                    new PollServiceEventArgs(HttpRequestHandler, HasEvents, GetEvents, NoEvents, urlcode));
+                PollServiceEventArgs args 
+                    = new PollServiceEventArgs(HttpRequestHandler, uri, HasEvents, GetEvents, NoEvents, urlcode, 25000);
+                args.Type = PollServiceEventArgs.EventType.LslHttp;
+                m_HttpServer.AddPollServiceHTTPHandler(uri, args);
 
                 m_log.DebugFormat(
                     "[URL MODULE]: Set up incoming request url {0} for {1} in {2} {3}",
@@ -280,9 +281,10 @@ namespace OpenSim.Region.CoreModules.Scripting.LSLHttp
                 
                 string uri = "/lslhttps/" + urlcode.ToString() + "/";
                
-                m_HttpsServer.AddPollServiceHTTPHandler(
-                    uri,
-                    new PollServiceEventArgs(HttpRequestHandler, HasEvents, GetEvents, NoEvents, urlcode));
+                PollServiceEventArgs args 
+                    = new PollServiceEventArgs(HttpRequestHandler, uri, HasEvents, GetEvents, NoEvents, urlcode, 25000);
+                args.Type = PollServiceEventArgs.EventType.LslHttp;
+                m_HttpsServer.AddPollServiceHTTPHandler(uri, args);
 
                 m_log.DebugFormat(
                     "[URL MODULE]: Set up incoming secure request url {0} for {1} in {2} {3}",
@@ -516,7 +518,7 @@ namespace OpenSim.Region.CoreModules.Scripting.LSLHttp
             }
         }
 
-        private Hashtable GetEvents(UUID requestID, UUID sessionID, string request)
+        private Hashtable GetEvents(UUID requestID, UUID sessionID)
         {
             Hashtable response;
 

@@ -89,9 +89,30 @@ namespace OpenSim.Framework
     }
 
     /// <summary>
+    /// Class for delivering SmartThreadPool statistical information
+    /// </summary>
+    /// <remarks>
+    /// We do it this way so that we do not directly expose STP.
+    /// </remarks>
+    public class STPInfo
+    {
+        public string Name { get; set; }
+        public STPStartInfo STPStartInfo { get; set; }
+        public WIGStartInfo WIGStartInfo { get; set; }
+        public bool IsIdle { get; set; }
+        public bool IsShuttingDown { get; set; }       
+        public int MaxThreads { get; set; }
+        public int MinThreads { get; set; }
+        public int InUseThreads { get; set; }
+        public int ActiveThreads { get; set; }
+        public int WaitingCallbacks { get; set; }
+        public int MaxConcurrentWorkItems { get; set; }
+    }
+
+    /// <summary>
     /// Miscellaneous utility functions
     /// </summary>
-    public class Util
+    public static class Util
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
@@ -119,6 +140,11 @@ namespace OpenSim.Framework
 
         public static FireAndForgetMethod DefaultFireAndForgetMethod = FireAndForgetMethod.SmartThreadPool;
         public static FireAndForgetMethod FireAndForgetMethod = DefaultFireAndForgetMethod;
+
+        public static bool IsPlatformMono
+        {
+            get { return Type.GetType("Mono.Runtime") != null; }
+        }
 
         /// <summary>
         /// Gets the name of the directory where the current running executable
@@ -1221,7 +1247,7 @@ namespace OpenSim.Framework
             byte[] bytes =
             {
                 (byte)regionHandle, (byte)(regionHandle >> 8), (byte)(regionHandle >> 16), (byte)(regionHandle >> 24),
-                (byte)(regionHandle >> 32), (byte)(regionHandle >> 40), (byte)(regionHandle >> 48), (byte)(regionHandle << 56),
+                (byte)(regionHandle >> 32), (byte)(regionHandle >> 40), (byte)(regionHandle >> 48), (byte)(regionHandle >> 56),
                 (byte)x, (byte)(x >> 8), 0, 0,
                 (byte)y, (byte)(y >> 8), 0, 0 };
             return new UUID(bytes, 0);
@@ -1232,7 +1258,7 @@ namespace OpenSim.Framework
             byte[] bytes =
             {
                 (byte)regionHandle, (byte)(regionHandle >> 8), (byte)(regionHandle >> 16), (byte)(regionHandle >> 24),
-                (byte)(regionHandle >> 32), (byte)(regionHandle >> 40), (byte)(regionHandle >> 48), (byte)(regionHandle << 56),
+                (byte)(regionHandle >> 32), (byte)(regionHandle >> 40), (byte)(regionHandle >> 48), (byte)(regionHandle >> 56),
                 (byte)x, (byte)(x >> 8), (byte)z, (byte)(z >> 8),
                 (byte)y, (byte)(y >> 8), 0, 0 };
             return new UUID(bytes, 0);
@@ -1305,7 +1331,7 @@ namespace OpenSim.Framework
                     ru = "OSX/Mono";
                 else
                 {
-                    if (Type.GetType("Mono.Runtime") != null)
+                    if (IsPlatformMono)
                         ru = "Win/Mono";
                     else
                         ru = "Win/.NET";
@@ -1753,10 +1779,12 @@ namespace OpenSim.Framework
             FireAndForget(callback, null);
         }
 
-        public static void InitThreadPool(int maxThreads)
+        public static void InitThreadPool(int minThreads, int maxThreads)
         {
             if (maxThreads < 2)
                 throw new ArgumentOutOfRangeException("maxThreads", "maxThreads must be greater than 2");
+            if (minThreads > maxThreads || minThreads < 2)
+                throw new ArgumentOutOfRangeException("minThreads", "minThreads must be greater than 2 and less than or equal to maxThreads");
             if (m_ThreadPool != null)
                 throw new InvalidOperationException("SmartThreadPool is already initialized");
 
@@ -1764,7 +1792,7 @@ namespace OpenSim.Framework
             startInfo.ThreadPoolName = "Util";
             startInfo.IdleTimeout = 2000;
             startInfo.MaxWorkerThreads = maxThreads;
-            startInfo.MinWorkerThreads = 2;
+            startInfo.MinWorkerThreads = minThreads;
 
             m_ThreadPool = new SmartThreadPool(startInfo);
         }
@@ -1839,7 +1867,7 @@ namespace OpenSim.Framework
                     break;
                 case FireAndForgetMethod.SmartThreadPool:
                     if (m_ThreadPool == null)
-                        InitThreadPool(15); 
+                        InitThreadPool(2, 15); 
                     m_ThreadPool.QueueWorkItem((cb, o) => cb(o), realCallback, obj);
                     break;
                 case FireAndForgetMethod.Thread:
@@ -1852,73 +1880,30 @@ namespace OpenSim.Framework
         }
 
         /// <summary>
-        /// Get a thread pool report.
+        /// Get information about the current state of the smart thread pool.
         /// </summary>
-        /// <returns></returns>
-        public static string GetThreadPoolReport()
+        /// <returns>
+        /// null if this isn't the pool being used for non-scriptengine threads.
+        /// </returns>
+        public static STPInfo GetSmartThreadPoolInfo()
         {
-            string threadPoolUsed = null;
-            int maxThreads = 0;
-            int minThreads = 0;
-            int allocatedThreads = 0;
-            int inUseThreads = 0;
-            int waitingCallbacks = 0;
-            int completionPortThreads = 0;
+            if (m_ThreadPool == null)
+                return null;
 
-            StringBuilder sb = new StringBuilder();
-            if (FireAndForgetMethod == FireAndForgetMethod.SmartThreadPool)
-            {
-                // ROBUST currently leaves this the FireAndForgetMethod but never actually initializes the threadpool.
-                if (m_ThreadPool != null)
-                {
-                    threadPoolUsed = "SmartThreadPool";
-                    maxThreads = m_ThreadPool.MaxThreads;
-                    minThreads = m_ThreadPool.MinThreads;
-                    inUseThreads = m_ThreadPool.InUseThreads;
-                    allocatedThreads = m_ThreadPool.ActiveThreads;
-                    waitingCallbacks = m_ThreadPool.WaitingCallbacks;
-                }
-            }
-            else if (
-                FireAndForgetMethod == FireAndForgetMethod.UnsafeQueueUserWorkItem
-                    || FireAndForgetMethod == FireAndForgetMethod.UnsafeQueueUserWorkItem)
-            {
-                threadPoolUsed = "BuiltInThreadPool";
-                ThreadPool.GetMaxThreads(out maxThreads, out completionPortThreads);
-                ThreadPool.GetMinThreads(out minThreads, out completionPortThreads);
-                int availableThreads;
-                ThreadPool.GetAvailableThreads(out availableThreads, out completionPortThreads);
-                inUseThreads = maxThreads - availableThreads;
-                allocatedThreads = -1;
-                waitingCallbacks = -1;
-            }
+            STPInfo stpi = new STPInfo();
+            stpi.Name = m_ThreadPool.Name;
+            stpi.STPStartInfo = m_ThreadPool.STPStartInfo;
+            stpi.IsIdle = m_ThreadPool.IsIdle;
+            stpi.IsShuttingDown = m_ThreadPool.IsShuttingdown;
+            stpi.MaxThreads = m_ThreadPool.MaxThreads;
+            stpi.MinThreads = m_ThreadPool.MinThreads;
+            stpi.InUseThreads = m_ThreadPool.InUseThreads;
+            stpi.ActiveThreads = m_ThreadPool.ActiveThreads;
+            stpi.WaitingCallbacks = m_ThreadPool.WaitingCallbacks;
+            stpi.MaxConcurrentWorkItems = m_ThreadPool.Concurrency;
 
-            if (threadPoolUsed != null)
-            {
-                sb.AppendFormat("Thread pool used           : {0}\n", threadPoolUsed);
-                sb.AppendFormat("Max threads                : {0}\n", maxThreads);
-                sb.AppendFormat("Min threads                : {0}\n", minThreads);
-                sb.AppendFormat("Allocated threads          : {0}\n", allocatedThreads < 0 ? "not applicable" : allocatedThreads.ToString());
-                sb.AppendFormat("In use threads             : {0}\n", inUseThreads);
-                sb.AppendFormat("Work items waiting         : {0}\n", waitingCallbacks < 0 ? "not available" : waitingCallbacks.ToString());
-            }
-            else
-            {
-                sb.AppendFormat("Thread pool not used\n");
-            }
-
-            return sb.ToString();
+            return stpi;
         }
-
-//        private static object SmartThreadPoolCallback(object o)
-//        {
-//            object[] array = (object[])o;
-//            WaitCallback callback = (WaitCallback)array[0];
-//            object obj = array[1];
-//
-//            callback(obj);
-//            return null;
-//        }
 
         #endregion FireAndForget Threading Pattern
 
@@ -2136,7 +2121,7 @@ namespace OpenSim.Framework
         /// <param name="secret">the secret part</param>
         public static bool ParseUniversalUserIdentifier(string value, out UUID uuid, out string url, out string firstname, out string lastname, out string secret)
         {
-            uuid = UUID.Zero; url = string.Empty; firstname = "Unknown"; lastname = "User"; secret = string.Empty;
+            uuid = UUID.Zero; url = string.Empty; firstname = "Unknown"; lastname = "UserUPUUI"; secret = string.Empty;
 
             string[] parts = value.Split(';');
             if (parts.Length >= 1)
@@ -2231,6 +2216,114 @@ namespace OpenSim.Framework
         public static string EscapeForLike(string str)
         {
             return str.Replace("_", "\\_").Replace("%", "\\%");
+        }
+    }
+
+    public class DoubleQueue<T> where T:class
+    {
+        private Queue<T> m_lowQueue = new Queue<T>();
+        private Queue<T> m_highQueue = new Queue<T>();
+
+        private object m_syncRoot = new object();
+        private Semaphore m_s = new Semaphore(0, 1);
+
+        public DoubleQueue()
+        {
+        }
+
+        public virtual int Count
+        {
+            get { return m_highQueue.Count + m_lowQueue.Count; }
+        }
+
+        public virtual void Enqueue(T data)
+        {
+            Enqueue(m_lowQueue, data);
+        }
+
+        public virtual void EnqueueLow(T data)
+        {
+            Enqueue(m_lowQueue, data);
+        }
+
+        public virtual void EnqueueHigh(T data)
+        {
+            Enqueue(m_highQueue, data);
+        }
+
+        private void Enqueue(Queue<T> q, T data)
+        {
+            lock (m_syncRoot)
+            {
+                q.Enqueue(data);
+                m_s.WaitOne(0);
+                m_s.Release();
+            }
+        }
+
+        public virtual T Dequeue()
+        {
+            return Dequeue(Timeout.Infinite);
+        }
+
+        public virtual T Dequeue(int tmo)
+        {
+            return Dequeue(TimeSpan.FromMilliseconds(tmo));
+        }
+
+        public virtual T Dequeue(TimeSpan wait)
+        {
+            T res = null;
+
+            if (!Dequeue(wait, ref res))
+                return null;
+
+            return res;
+        }
+
+        public bool Dequeue(int timeout, ref T res)
+        {
+            return Dequeue(TimeSpan.FromMilliseconds(timeout), ref res);
+        }
+
+        public bool Dequeue(TimeSpan wait, ref T res)
+        {
+            if (!m_s.WaitOne(wait))
+                return false;
+
+            lock (m_syncRoot)
+            {
+                if (m_highQueue.Count > 0)
+                    res = m_highQueue.Dequeue();
+                else if (m_lowQueue.Count > 0)
+                    res = m_lowQueue.Dequeue();
+
+                if (m_highQueue.Count == 0 && m_lowQueue.Count == 0)
+                    return true;
+
+                try
+                {
+                    m_s.Release();
+                }
+                catch
+                {
+                }
+
+                return true;
+            }
+        }
+
+        public virtual void Clear()
+        {
+
+            lock (m_syncRoot)
+            {
+                // Make sure sem count is 0
+                m_s.WaitOne(0);
+
+                m_lowQueue.Clear();
+                m_highQueue.Clear();
+            }
         }
     }
 }

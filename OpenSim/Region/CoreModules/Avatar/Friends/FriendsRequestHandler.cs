@@ -54,7 +54,7 @@ namespace OpenSim.Region.CoreModules.Avatar.Friends
             m_FriendsModule = fmodule;
         }
 
-        public override byte[] Handle(
+        protected override byte[] ProcessRequest(
             string path, Stream requestData, IOSHttpRequest httpRequest, IOSHttpResponse httpResponse)
         {
             StreamReader sr = new StreamReader(requestData);
@@ -193,7 +193,7 @@ namespace OpenSim.Region.CoreModules.Avatar.Friends
             if (!UUID.TryParse(request["ToID"].ToString(), out toID))
                 return FailureResult();
 
-            if (m_FriendsModule.LocalFriendshipTerminated(toID))
+            if (m_FriendsModule.LocalFriendshipTerminated(fromID, toID))
                 return SuccessResult();
 
             return FailureResult();

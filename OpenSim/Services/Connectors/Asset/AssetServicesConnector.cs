@@ -55,6 +55,11 @@ namespace OpenSim.Services.Connectors
         // Maps: Asset ID -> Handlers which will be called when the asset has been loaded
         private Dictionary<string, AssetRetrievedEx> m_AssetHandlers = new Dictionary<string, AssetRetrievedEx>();
 
+        public int MaxAssetRequestConcurrency
+        {
+            get { return m_maxAssetRequestConcurrency; }
+            set { m_maxAssetRequestConcurrency = value; }
+        }
 
         public AssetServicesConnector()
         {
@@ -251,7 +256,7 @@ namespace OpenSim.Services.Connectors
 
         public string Store(AssetBase asset)
         {
-            if (asset.Temporary || asset.Local)
+            if (asset.Local)
             {
                 if (m_Cache != null)
                     m_Cache.Cache(asset);

@@ -54,11 +54,11 @@ namespace OpenSim.Region.CoreModules.Framework.UserManagement
 
         public new void Initialise(IConfigSource config)
         {
-            string umanmod = config.Configs["Modules"].GetString("UserManagementModule", Name);
+            string umanmod = config.Configs["Modules"].GetString("UserManagementModule", null);
             if (umanmod == Name)
             {
                 m_Enabled = true;
-                RegisterConsoleCmds();
+                Init();
                 m_log.DebugFormat("[USER MANAGEMENT MODULE]: {0} is enabled", Name);
             }
         }

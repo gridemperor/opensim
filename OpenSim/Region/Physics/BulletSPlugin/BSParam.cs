@@ -54,6 +54,9 @@ public static class BSParam
     // ===================
     // From:
 
+    public static bool UseSeparatePhysicsThread { get; private set; }
+    public static float PhysicsTimeStep { get; private set; }
+
     // Level of Detail values kept as float because that's what the Meshmerizer wants
     public static float MeshLOD { get; private set; }
     public static float MeshCircularLOD { get; private set; }
@@ -89,6 +92,8 @@ public static class BSParam
     public static bool ShouldRemoveZeroWidthTriangles { get; private set; }
     public static bool ShouldUseBulletHACD { get; set; }
     public static bool ShouldUseSingleConvexHullForPrims { get; set; }
+    public static bool ShouldUseGImpactShapeForPrims { get; set; }
+    public static bool ShouldUseAssetHulls { get; set; }
 
     public static float TerrainImplementation { get; set; }
     public static int TerrainMeshMagnification { get; private set; }
@@ -129,6 +134,7 @@ public static class BSParam
     public static float AvatarHeightMidFudge { get; private set; }
     public static float AvatarHeightHighFudge { get; private set; }
 	public static float AvatarContactProcessingThreshold { get; private set; }
+	public static int AvatarJumpFrames { get; private set; }
 	public static float AvatarBelowGroundUpCorrectionMeters { get; private set; }
 	public static float AvatarStepHeight { get; private set; }
 	public static float AvatarStepApproachFactor { get; private set; }
@@ -146,9 +152,15 @@ public static class BSParam
     public static float VehicleRestitution { get; private set; }
     public static Vector3 VehicleLinearFactor { get; private set; }
     public static Vector3 VehicleAngularFactor { get; private set; }
+    public static Vector3 VehicleInertiaFactor { get; private set; }
     public static float VehicleGroundGravityFudge { get; private set; }
     public static float VehicleAngularBankingTimescaleFudge { get; private set; }
-    public static bool VehicleDebuggingEnable { get; private set; }
+    public static bool VehicleEnableLinearDeflection { get; private set; }
+    public static bool VehicleLinearDeflectionNotCollidingNoZ { get; private set; }
+    public static bool VehicleEnableAngularVerticalAttraction { get; private set; }
+    public static int VehicleAngularVerticalAttractionAlgorithm { get; private set; }
+    public static bool VehicleEnableAngularDeflection { get; private set; }
+    public static bool VehicleEnableAngularBanking { get; private set; }
 
     // Convex Hulls
     public static int CSHullMaxDepthSplit { get; private set; }
@@ -169,6 +181,7 @@ public static class BSParam
 
     // Linkset implementation parameters
     public static float LinksetImplementation { get; private set; }
+    public static bool LinksetOffsetCenterOfMass { get; private set; }
     public static bool LinkConstraintUseFrameOffset { get; private set; }
     public static bool LinkConstraintEnableTransMotor { get; private set; }
     public static float LinkConstraintTransMotorMaxVel { get; private set; }
@@ -351,6 +364,11 @@ public static class BSParam
     //    v = value (appropriate type)
     private static ParameterDefnBase[] ParameterDefinitions =
     {
+        new ParameterDefn<bool>("UseSeparatePhysicsThread", "If 'true', the physics engine runs independent from the simulator heartbeat",
+            false ),
+        new ParameterDefn<float>("PhysicsTimeStep", "If separate thread, seconds to simulate each interval",
+            0.089f ),
+
         new ParameterDefn<bool>("MeshSculptedPrim", "Whether to create meshes for sculpties",
             true,
             (s) => { return ShouldMeshSculptedPrim; },
@@ -368,6 +386,10 @@ public static class BSParam
         new ParameterDefn<bool>("ShouldUseBulletHACD", "If true, use the Bullet version of HACD",
             false ),
         new ParameterDefn<bool>("ShouldUseSingleConvexHullForPrims", "If true, use a single convex hull shape for physical prims",
+            true ),
+        new ParameterDefn<bool>("ShouldUseGImpactShapeForPrims", "If true, use a GImpact shape for prims with cuts and twists",
+            false ),
+        new ParameterDefn<bool>("ShouldUseAssetHulls", "If true, use hull if specified in the mesh asset info",
             true ),
 
         new ParameterDefn<int>("CrossingFailuresBeforeOutOfBounds", "How forgiving we are about getting into adjactent regions",
@@ -439,6 +461,7 @@ public static class BSParam
             (s) => { return MaxAddForceMagnitude; },
             (s,v) => { MaxAddForceMagnitude = v; MaxAddForceMagnitudeSquared = v * v; } ),
         // Density is passed around as 100kg/m3. This scales that to 1kg/m3.
+        // Reduce by power of 100 because Bullet doesn't seem to handle objects with large mass very well
         new ParameterDefn<float>("DensityScaleFactor", "Conversion for simulator/viewer density (100kg/m3) to physical density (1kg/m3)",
             0.01f ),
 
@@ -451,8 +474,9 @@ public static class BSParam
             0.2f,
             (s) => { return DefaultFriction; },
             (s,v) => { DefaultFriction = v; s.UnmanagedParams[0].defaultFriction = v; } ),
+        // For historical reasons, the viewer and simulator multiply the density by 100
         new ParameterDefn<float>("DefaultDensity", "Density for new objects" ,
-            10.000006836f,  // Aluminum g/cm3
+            1000.0006836f,  // Aluminum g/cm3 * 100
             (s) => { return DefaultDensity; },
             (s,v) => { DefaultDensity = v; s.UnmanagedParams[0].defaultDensity = v; } ),
         new ParameterDefn<float>("DefaultRestitution", "Bouncyness of an object" ,
@@ -532,8 +556,9 @@ public static class BSParam
             0.95f ),
         new ParameterDefn<float>("AvatarAlwaysRunFactor", "Speed multiplier if avatar is set to always run",
             1.3f ),
-        new ParameterDefn<float>("AvatarDensity", "Density of an avatar. Changed on avatar recreation.",
-            3.5f) ,
+            // For historical reasons, density is reported  * 100
+        new ParameterDefn<float>("AvatarDensity", "Density of an avatar. Changed on avatar recreation. Scaled times 100.",
+            3500f) ,    // 3.5 * 100
         new ParameterDefn<float>("AvatarRestitution", "Bouncyness. Changed on avatar recreation.",
             0f ),
         new ParameterDefn<float>("AvatarCapsuleWidth", "The distance between the sides of the avatar capsule",
@@ -552,6 +577,8 @@ public static class BSParam
             0.1f ),
 	    new ParameterDefn<float>("AvatarBelowGroundUpCorrectionMeters", "Meters to move avatar up if it seems to be below ground",
             1.0f ),
+	    new ParameterDefn<int>("AvatarJumpFrames", "Number of frames to allow jump forces. Changes jump height.",
+            4 ),
 	    new ParameterDefn<float>("AvatarStepHeight", "Height of a step obstacle to consider step correction",
             0.6f ) ,
 	    new ParameterDefn<float>("AvatarStepApproachFactor", "Factor to control angle of approach to step (0=straight on)",
@@ -577,6 +604,8 @@ public static class BSParam
             new Vector3(1f, 1f, 1f) ),
         new ParameterDefn<Vector3>("VehicleAngularFactor", "Fraction of physical angular changes applied to vehicle (<0,0,0> to <1,1,1>)",
             new Vector3(1f, 1f, 1f) ),
+        new ParameterDefn<Vector3>("VehicleInertiaFactor", "Fraction of physical inertia applied (<0,0,0> to <1,1,1>)",
+            new Vector3(1f, 1f, 1f) ),
         new ParameterDefn<float>("VehicleFriction", "Friction of vehicle on the ground (0.0 - 1.0)",
             0.0f ),
         new ParameterDefn<float>("VehicleRestitution", "Bouncyness factor for vehicles (0.0 - 1.0)",
@@ -585,8 +614,18 @@ public static class BSParam
             0.2f ),
         new ParameterDefn<float>("VehicleAngularBankingTimescaleFudge", "Factor to multiple angular banking timescale. Tune to increase realism.",
             60.0f ),
-        new ParameterDefn<bool>("VehicleDebuggingEnable", "Turn on/off vehicle debugging",
-            false ),
+        new ParameterDefn<bool>("VehicleEnableLinearDeflection", "Turn on/off vehicle linear deflection effect",
+            true ),
+        new ParameterDefn<bool>("VehicleLinearDeflectionNotCollidingNoZ", "Turn on/off linear deflection Z effect on non-colliding vehicles",
+            true ),
+        new ParameterDefn<bool>("VehicleEnableAngularVerticalAttraction", "Turn on/off vehicle angular vertical attraction effect",
+            true ),
+        new ParameterDefn<int>("VehicleAngularVerticalAttractionAlgorithm", "Select vertical attraction algo. You need to look at the source.",
+            0 ),
+        new ParameterDefn<bool>("VehicleEnableAngularDeflection", "Turn on/off vehicle angular deflection effect",
+            true ),
+        new ParameterDefn<bool>("VehicleEnableAngularBanking", "Turn on/off vehicle angular banking effect",
+            true ),
 
 	    new ParameterDefn<float>("MaxPersistantManifoldPoolSize", "Number of manifolds pooled (0 means default of 4096)",
             0f,
@@ -664,6 +703,8 @@ public static class BSParam
 
 	    new ParameterDefn<float>("LinksetImplementation", "Type of linkset implementation (0=Constraint, 1=Compound, 2=Manual)",
             (float)BSLinkset.LinksetImplementation.Compound ),
+	    new ParameterDefn<bool>("LinksetOffsetCenterOfMass", "If 'true', compute linkset center-of-mass and offset linkset position to account for same",
+            true ),
 	    new ParameterDefn<bool>("LinkConstraintUseFrameOffset", "For linksets built with constraints, enable frame offsetFor linksets built with constraints, enable frame offset.",
             false ),
 	    new ParameterDefn<bool>("LinkConstraintEnableTransMotor", "Whether to enable translational motor on linkset constraints",
@@ -686,7 +727,7 @@ public static class BSParam
         new ParameterDefn<float>("ResetBroadphasePool", "Setting this is any value resets the broadphase collision pool",
             0f,
             (s) => { return 0f; },
-            (s,v) => { BSParam.ResetBroadphasePoolTainted(s, v); } ),
+            (s,v) => { BSParam.ResetBroadphasePoolTainted(s, v, false /* inTaintTime */); } ),
         new ParameterDefn<float>("ResetConstraintSolver", "Setting this is any value resets the constraint solver",
             0f,
             (s) => { return 0f; },
@@ -772,10 +813,10 @@ public static class BSParam
     // =====================================================================
     // There are parameters that, when set, cause things to happen in the physics engine.
     // This causes the broadphase collision cache to be cleared.
-    private static void ResetBroadphasePoolTainted(BSScene pPhysScene, float v)
+    private static void ResetBroadphasePoolTainted(BSScene pPhysScene, float v, bool inTaintTime)
     {
         BSScene physScene = pPhysScene;
-        physScene.TaintedObject("BSParam.ResetBroadphasePoolTainted", delegate()
+        physScene.TaintedObject(inTaintTime, "BSParam.ResetBroadphasePoolTainted", delegate()
         {
             physScene.PE.ResetBroadphasePool(physScene.World);
         });

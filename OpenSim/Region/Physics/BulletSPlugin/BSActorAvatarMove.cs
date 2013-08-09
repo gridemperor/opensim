@@ -43,7 +43,13 @@ public class BSActorAvatarMove : BSActor
     // Set to true if we think we're going up stairs.
     //    This state is remembered because collisions will turn on and off as we go up stairs.
     int m_walkingUpStairs;
+    // The amount the step up is applying. Used to smooth stair walking.
     float m_lastStepUp;
+
+    // Jumping happens over several frames. If use applies up force while colliding, start the
+    //    jump and allow the jump to continue for this number of frames.
+    int m_jumpFrames = 0;
+    float m_jumpVelocity = 0f;
 
     public BSActorAvatarMove(BSScene physicsScene, BSPhysObject pObj, string actorName)
         : base(physicsScene, pObj, actorName)
@@ -124,6 +130,7 @@ public class BSActorAvatarMove : BSActor
             SetVelocityAndTarget(m_controllingPrim.RawVelocity, m_controllingPrim.TargetVelocity, true /* inTaintTime */);
 
             m_physicsScene.BeforeStep += Mover;
+            m_controllingPrim.OnPreUpdateProperty += Process_OnPreUpdateProperty;
 
             m_walkingUpStairs = 0;
         }
@@ -133,6 +140,7 @@ public class BSActorAvatarMove : BSActor
     {
         if (m_velocityMotor != null)
         {
+            m_controllingPrim.OnPreUpdateProperty -= Process_OnPreUpdateProperty;
             m_physicsScene.BeforeStep -= Mover;
             m_velocityMotor = null;
         }
@@ -191,7 +199,7 @@ public class BSActorAvatarMove : BSActor
             {
                 if (m_controllingPrim.Flying)
                 {
-                    // Flying and not collising and velocity nearly zero.
+                    // Flying and not colliding and velocity nearly zero.
                     m_controllingPrim.ZeroMotion(true /* inTaintTime */);
                 }
             }
@@ -206,17 +214,45 @@ public class BSActorAvatarMove : BSActor
 
             if (m_controllingPrim.Friction != BSParam.AvatarFriction)
             {
-                // Probably starting up walking. Set friction to moving friction.
+                // Probably starting to walk. Set friction to moving friction.
                 m_controllingPrim.Friction = BSParam.AvatarFriction;
                 m_physicsScene.PE.SetFriction(m_controllingPrim.PhysBody, m_controllingPrim.Friction);
             }
 
-            // If falling, we keep the world's downward vector no matter what the other axis specify.
-            // The check for RawVelocity.Z < 0 makes jumping work (temporary upward force).
             if (!m_controllingPrim.Flying && !m_controllingPrim.IsColliding)
             {
-                if (m_controllingPrim.RawVelocity.Z < 0)
+                stepVelocity.Z = m_controllingPrim.RawVelocity.Z;
+            }
+
+
+            // Colliding and not flying with an upward force. The avatar must be trying to jump.
+            if (!m_controllingPrim.Flying && m_controllingPrim.IsColliding && stepVelocity.Z > 0)
+            {
+                // We allow the upward force to happen for this many frames.
+                m_jumpFrames = BSParam.AvatarJumpFrames;
+                m_jumpVelocity = stepVelocity.Z;
+            }
+
+            // The case where the avatar is not colliding and is not flying is special.
+            // The avatar is either falling or jumping and the user can be applying force to the avatar
+            //     (force in some direction or force up or down).
+            // If the avatar has negative Z velocity and is not colliding, presume we're falling and keep the velocity.
+            // If the user is trying to apply upward force but we're not colliding, assume the avatar
+            //     is trying to jump and don't apply the upward force if not touching the ground any more.
+            if (!m_controllingPrim.Flying && !m_controllingPrim.IsColliding)
+            {
+                // If upward velocity is being applied, this must be a jump and only allow that to go on so long
+                if (m_jumpFrames > 0)
+                {
+                    // Since not touching the ground, only apply upward force for so long.
+                    m_jumpFrames--;
+                    stepVelocity.Z = m_jumpVelocity;
+                }
+                else
+                {
+                    // Since we're not affected by anything, whatever vertical motion the avatar has, continue that.
                     stepVelocity.Z = m_controllingPrim.RawVelocity.Z;
+                }
                 // DetailLog("{0},BSCharacter.MoveMotor,taint,overrideStepZWithWorldZ,stepVel={1}", LocalID, stepVelocity);
             }
 
@@ -232,6 +268,19 @@ public class BSActorAvatarMove : BSActor
         }
     }
 
+    // Called just as the property update is received from the physics engine.
+    // Do any mode necessary for avatar movement.
+    private void Process_OnPreUpdateProperty(ref EntityProperties entprop)
+    {
+        // Don't change position if standing on a stationary object.
+        if (m_controllingPrim.IsStationary)
+        {
+            entprop.Position = m_controllingPrim.RawPosition;
+            m_physicsScene.PE.SetTranslation(m_controllingPrim.PhysBody, entprop.Position, entprop.Rotation);
+        }
+
+    }
+
     // Decide if the character is colliding with a low object and compute a force to pop the
     //    avatar up so it can walk up and over the low objects.
     private OMV.Vector3 WalkUpStairs()
@@ -241,7 +290,7 @@ public class BSActorAvatarMove : BSActor
         m_physicsScene.DetailLog("{0},BSCharacter.WalkUpStairs,IsColliding={1},flying={2},targSpeed={3},collisions={4},avHeight={5}",
                         m_controllingPrim.LocalID, m_controllingPrim.IsColliding, m_controllingPrim.Flying,
                         m_controllingPrim.TargetVelocitySpeed, m_controllingPrim.CollisionsLastTick.Count, m_controllingPrim.Size.Z);
-        // This test is done if moving forward, not flying and is colliding with something.
+
         // Check for stairs climbing if colliding, not flying and moving forward
         if ( m_controllingPrim.IsColliding
                     && !m_controllingPrim.Flying
