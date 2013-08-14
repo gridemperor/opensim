@@ -26,6 +26,7 @@
  */
 
 using System;
+using System.IO;
 using System.Reflection;
 using System.Threading;
 using log4net;
@@ -50,28 +51,50 @@ namespace pCampBot
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
+        public const string ConfigFileName = "pCampbot.ini";
+
         [STAThread]
         public static void Main(string[] args)
         {
             XmlConfigurator.Configure();
 
-            IConfig config = ParseConfig(args);
-            if (config.Get("help") != null || config.Get("loginuri") == null)
+            IConfig commandLineConfig = ParseConfig(args);
+            if (commandLineConfig.Get("help") != null || commandLineConfig.Get("loginuri") == null)
             {
                 Help();
             }
-            else if (config.Get("firstname") == null ||  config.Get("lastname") == null || config.Get("password") == null)
+            else if (
+                commandLineConfig.Get("firstname") == null 
+                    ||  commandLineConfig.Get("lastname") == null 
+                    || commandLineConfig.Get("password") == null)
             {
                 Console.WriteLine("ERROR: You must supply a firstname, lastname and password for the bots.");
             }
             else
             {
-                int botcount = config.GetInt("botcount", 1);
-
                 BotManager bm = new BotManager();
 
+                string iniFilePath = Path.GetFullPath(Path.Combine(Util.configDir(), ConfigFileName));
+
+                if (File.Exists(iniFilePath))
+                {
+                    m_log.InfoFormat("[PCAMPBOT]: Reading configuration settings from {0}", iniFilePath);
+
+                    IConfigSource configSource = new IniConfigSource(iniFilePath);
+
+                    IConfig botConfig = configSource.Configs["Bot"];
+
+                    if (botConfig != null)
+                    {
+                        bm.BotsInitSendAgentUpdates 
+                            = botConfig.GetBoolean("SendAgentUpdates", bm.BotsInitSendAgentUpdates);
+                    }
+                }
+
+                int botcount = commandLineConfig.GetInt("botcount", 1);
+
                 //startup specified number of bots.  1 is the default
-                Thread startBotThread = new Thread(o => bm.dobotStartup(botcount, config));
+                Thread startBotThread = new Thread(o => bm.dobotStartup(botcount, commandLineConfig));
                 startBotThread.Name = "Initial start bots thread";
                 startBotThread.Start();
 
@@ -123,9 +146,10 @@ namespace pCampBot
                 "  -password          password for the bots\n" +
                 "  -b, behaviours     behaviours for bots.  Comma separated, e.g. p,g.  Default is p\n" +
                 "    current options are:\n" +
-                "       p (physics)\n" +
-                "       g (grab)\n" +
-                "       t (teleport)\n" +
+                "       p (physics  - bots constantly move and jump around)\n" +
+                "       g (grab     - bots randomly click prims whether set clickable or not)\n" +
+                "       n (none     - bots do nothing)\n" +
+                "       t (teleport - bots regularly teleport between regions on the grid)\n" +
 //                "       c (cross)" +
                 "  -wear              set appearance folder to load from (default: no)\n" +
                 "  -h, -help          show this message");
