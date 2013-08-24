@@ -1,3 +1,13 @@
+# Third Party Provider
+Gridemperor.com is a third party provider of this software.  
+
+The site administrator and staff do not have any control over the development of this software.  
+For support for this software please visit the developer’s site for support options.  
+The staff and site administrator for gridemperor.com is in no way responsible for the maintaining of this 
+software or any outcome the software may have whether positive or negative. 
+
+Gridemperor.com only serves as a resource site for virtual world grids and software.
+
 Welcome to OpenSim!
 
 # Overview
