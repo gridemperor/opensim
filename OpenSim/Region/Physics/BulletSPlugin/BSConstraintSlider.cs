@@ -6,7 +6,7 @@
  * modification, are permitted provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright
  *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
+ *     * Redistributions in binary form must reproduce the above copyrightD
  *       notice, this list of conditions and the following disclaimer in the
  *       documentation and/or other materials provided with the distribution.
  *     * Neither the name of the OpenSimulator Project nor the
@@ -24,44 +24,32 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
 using System;
+using System.Collections.Generic;
+using System.Text;
+using OpenMetaverse;
 
-namespace pCampBot.Interfaces
+namespace OpenSim.Region.Physics.BulletSPlugin
 {
-    public interface IBehaviour
+
+public sealed class BSConstraintSlider : BSConstraint
+{
+    public override ConstraintType Type { get { return ConstraintType.SLIDER_CONSTRAINT_TYPE; } }
+
+    public BSConstraintSlider(BulletWorld world, BulletBody obj1, BulletBody obj2,
+                    Vector3 frameInAloc, Quaternion frameInArot,
+                    Vector3 frameInBloc, Quaternion frameInBrot,
+                    bool useLinearReferenceFrameA, bool disableCollisionsBetweenLinkedBodies)
+        : base(world)
     {
-        /// <summary>
-        /// Abbreviated name of this behaviour. 
-        /// </summary>
-        string AbbreviatedName { get; }
-
-        /// <summary>
-        /// Name of this behaviour.
-        /// </summary>
-        string Name { get; }
-
-        /// <summary>
-        /// Initialize the behaviour for this bot.
-        /// </summary>
-        /// <remarks>
-        /// This must be invoked before Action() is called.
-        /// </remarks>
-        /// <param name="bot"></param>
-        void Initialize(Bot bot);
-
-        /// <summary>
-        /// Close down this behaviour.
-        /// </summary>
-        /// <remarks>
-        /// This is triggered if a behaviour is removed via explicit command and when a bot is disconnected
-        /// </remarks>
-        void Close();
-
-        /// <summary>
-        /// Action to take when this behaviour is invoked.
-        /// </summary>
-        /// <param name="bot"></param>
-        void Action();
+        m_body1 = obj1;
+        m_body2 = obj2;
+        m_constraint = PhysicsScene.PE.CreateSliderConstraint(world, obj1, obj2,
+                                frameInAloc, frameInArot, frameInBloc, frameInBrot,
+                                useLinearReferenceFrameA, disableCollisionsBetweenLinkedBodies);
+        m_enabled = true;
     }
+
+}
+
 }
