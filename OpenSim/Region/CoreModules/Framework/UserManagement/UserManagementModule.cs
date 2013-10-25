@@ -643,6 +643,7 @@ namespace OpenSim.Region.CoreModules.Framework.UserManagement
 
         protected void Init()
         {
+            AddUser(UUID.Zero, "Unknown", "User");
             RegisterConsoleCmds();
         }
 
