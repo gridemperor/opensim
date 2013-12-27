@@ -473,7 +473,7 @@ namespace OpenSim.Region.Framework.Scenes
         {
             get
             {
-                if (CreatorData != null && CreatorData != string.Empty)
+                if (!string.IsNullOrEmpty(CreatorData))
                     return CreatorID.ToString() + ';' + CreatorData;
                 else
                     return CreatorID.ToString();
@@ -787,16 +787,6 @@ namespace OpenSim.Region.Framework.Scenes
                     catch (Exception e)
                     {
                         m_log.ErrorFormat("[SCENEOBJECTPART]: GROUP POSITION. {0}", e);
-                    }
-                }
-                
-                // TODO if we decide to do sitting in a more SL compatible way (multiple avatars per prim), this has to be fixed, too
-                if (SitTargetAvatar != UUID.Zero)
-                {
-                    ScenePresence avatar;
-                    if (ParentGroup.Scene.TryGetScenePresence(SitTargetAvatar, out avatar))
-                    {
-                        avatar.ParentPosition = GetWorldPosition();
                     }
                 }
             }

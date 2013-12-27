@@ -26,33 +26,46 @@
  */
 
 using System;
+using System.Collections.Generic;
+using System.Reflection;
+using NUnit.Framework;
 using OpenMetaverse;
-using OpenMetaverse.StructuredData;
 using OpenSim.Framework;
+using OpenSim.Framework.Communications;
+using OpenSim.Region.Framework.Scenes;
+using OpenSim.Tests.Common;
+using OpenSim.Tests.Common.Mock;
 
-namespace OpenSim.Data
+namespace OpenSim.Region.Framework.Scenes.Tests
 {
-
-    public interface IProfilesData
+    [TestFixture]
+    public class SceneStatisticsTests : OpenSimTestCase
     {
-        OSDArray GetClassifiedRecords(UUID creatorId);
-        bool UpdateClassifiedRecord(UserClassifiedAdd ad, ref string result);
-        bool DeleteClassifiedRecord(UUID recordId);
-        OSDArray GetAvatarPicks(UUID avatarId);
-        UserProfilePick GetPickInfo(UUID avatarId, UUID pickId);
-        bool UpdatePicksRecord(UserProfilePick pick);
-        bool DeletePicksRecord(UUID pickId);
-        bool GetAvatarNotes(ref UserProfileNotes note);
-        bool UpdateAvatarNotes(ref UserProfileNotes note, ref string result);
-        bool GetAvatarProperties(ref UserProfileProperties props, ref string result);
-        bool UpdateAvatarProperties(ref UserProfileProperties props, ref string result);
-        bool UpdateAvatarInterests(UserProfileProperties up, ref string result);
-        bool GetClassifiedInfo(ref UserClassifiedAdd ad, ref string result);
-        bool UpdateUserPreferences(ref UserPreferences pref,  ref string result);
-        bool GetUserPreferences(ref UserPreferences pref, ref string result);
-        bool GetUserAppData(ref UserAppData props, ref string result);
-        bool SetUserAppData(UserAppData props, ref string result);
-        OSDArray GetUserImageAssets(UUID avatarId);
+        private TestScene m_scene;
+
+        [SetUp]
+        public void Init()
+        {
+            m_scene = new SceneHelpers().SetupScene();
+        }
+
+        [Test]
+        public void TestAddRemovePhysicalLinkset()
+        {
+            Assert.That(m_scene.SceneGraph.GetActiveObjectsCount(), Is.EqualTo(0));
+
+            UUID ownerId = TestHelpers.ParseTail(0x1);
+            SceneObjectGroup so1 = SceneHelpers.CreateSceneObject(3, ownerId, "so1", 0x10);
+            so1.ScriptSetPhysicsStatus(true);
+            m_scene.AddSceneObject(so1);
+
+            Assert.That(m_scene.SceneGraph.GetTotalObjectsCount(), Is.EqualTo(3));
+            Assert.That(m_scene.SceneGraph.GetActiveObjectsCount(), Is.EqualTo(3));
+
+            m_scene.DeleteSceneObject(so1, false);
+
+            Assert.That(m_scene.SceneGraph.GetTotalObjectsCount(), Is.EqualTo(0));
+            Assert.That(m_scene.SceneGraph.GetActiveObjectsCount(), Is.EqualTo(0));
+        }
     }
 }
-
