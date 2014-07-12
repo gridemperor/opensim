@@ -38,20 +38,31 @@ using System.Xml.Serialization;
 using OpenSim.Server.Base;
 using OpenSim.Services.Interfaces;
 using OpenSim.Framework;
+using OpenSim.Framework.ServiceAuth;
 using OpenSim.Framework.Servers.HttpServer;
 
 namespace OpenSim.Server.Handlers.Asset
 {
     public class AssetServerGetHandler : BaseStreamHandler
     {
-        // private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+        private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
         private IAssetService m_AssetService;
+        private string m_RedirectURL;
 
         public AssetServerGetHandler(IAssetService service) :
                 base("GET", "/assets")
         {
+            m_AssetService = service; 
+        }
+
+        public AssetServerGetHandler(IAssetService service, IServiceAuth auth, string redirectURL) :
+            base("GET", "/assets", auth)
+        {
             m_AssetService = service;
+            m_RedirectURL = redirectURL;
+            if (!m_RedirectURL.EndsWith("/"))
+                m_RedirectURL = m_RedirectURL.TrimEnd('/');
         }
 
         protected override byte[] ProcessRequest(string path, Stream request,
@@ -64,45 +75,62 @@ namespace OpenSim.Server.Handlers.Asset
             if (p.Length == 0)
                 return result;
 
-            if (p.Length > 1 && p[1] == "data")
+            string id = string.Empty;
+            if (p.Length > 1)
             {
-                result = m_AssetService.GetData(p[0]);
-                if (result == null)
+                id = p[0];
+                string cmd = p[1];
+
+                if (cmd == "data")
                 {
-                    httpResponse.StatusCode = (int)HttpStatusCode.NotFound;
-                    httpResponse.ContentType = "text/plain";
-                    result = new byte[0];
+                    result = m_AssetService.GetData(id);
+                    if (result == null)
+                    {
+                        httpResponse.StatusCode = (int)HttpStatusCode.NotFound;
+                        httpResponse.ContentType = "text/plain";
+                        result = new byte[0];
+                    }
+                    else
+                    {
+                        httpResponse.StatusCode = (int)HttpStatusCode.OK;
+                        httpResponse.ContentType = "application/octet-stream";
+                    }
+                }
+                else if (cmd == "metadata")
+                {
+                    AssetMetadata metadata = m_AssetService.GetMetadata(id);
+
+                    if (metadata != null)
+                    {
+                        XmlSerializer xs =
+                                new XmlSerializer(typeof(AssetMetadata));
+                        result = ServerUtils.SerializeResult(xs, metadata);
+
+                        httpResponse.StatusCode = (int)HttpStatusCode.OK;
+                        httpResponse.ContentType =
+                                SLUtil.SLAssetTypeToContentType(metadata.Type);
+                    }
+                    else
+                    {
+                        httpResponse.StatusCode = (int)HttpStatusCode.NotFound;
+                        httpResponse.ContentType = "text/plain";
+                        result = new byte[0];
+                    }
                 }
                 else
                 {
-                    httpResponse.StatusCode = (int)HttpStatusCode.OK;
-                    httpResponse.ContentType = "application/octet-stream";
-                }
-            }
-            else if (p.Length > 1 && p[1] == "metadata")
-            {
-                AssetMetadata metadata = m_AssetService.GetMetadata(p[0]);
-
-                if (metadata != null)
-                {
-                    XmlSerializer xs =
-                            new XmlSerializer(typeof(AssetMetadata));
-                    result = ServerUtils.SerializeResult(xs, metadata);
-
-                    httpResponse.StatusCode = (int)HttpStatusCode.OK;
-                    httpResponse.ContentType =
-                            SLUtil.SLAssetTypeToContentType(metadata.Type);
-                }
-                else
-                {
-                    httpResponse.StatusCode = (int)HttpStatusCode.NotFound;
+                    // Unknown request
+                    httpResponse.StatusCode = (int)HttpStatusCode.BadRequest;
                     httpResponse.ContentType = "text/plain";
                     result = new byte[0];
                 }
             }
-            else
+            else if (p.Length == 1)
             {
-                AssetBase asset = m_AssetService.Get(p[0]);
+                // Get the entire asset (metadata + data)
+
+                id = p[0];
+                AssetBase asset = m_AssetService.Get(id);
 
                 if (asset != null)
                 {
@@ -119,6 +147,24 @@ namespace OpenSim.Server.Handlers.Asset
                     httpResponse.ContentType = "text/plain";
                     result = new byte[0];
                 }
+            }
+            else
+            {
+                // Unknown request
+                httpResponse.StatusCode = (int)HttpStatusCode.BadRequest;
+                httpResponse.ContentType = "text/plain";
+                result = new byte[0];
+            }
+            
+            if (httpResponse.StatusCode == (int)HttpStatusCode.NotFound && !string.IsNullOrEmpty(m_RedirectURL) && !string.IsNullOrEmpty(id))
+            {
+                httpResponse.StatusCode = (int)HttpStatusCode.Redirect;
+                string rurl = m_RedirectURL;
+                if (!path.StartsWith("/"))
+                    rurl += "/";
+                rurl += path;
+                httpResponse.AddHeader("Location", rurl);
+                m_log.DebugFormat("[ASSET GET HANDLER]: Asset not found, redirecting to {0} ({1})", rurl, httpResponse.StatusCode);
             }
             return result;
         }

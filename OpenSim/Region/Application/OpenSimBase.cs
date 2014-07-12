@@ -71,6 +71,20 @@ namespace OpenSim
         // OpenSim.ini Section name for ESTATES Settings
         public const string ESTATE_SECTION_NAME = "Estates";
 
+        /// <summary>
+        /// Allow all plugin loading to be disabled for tests/debug.
+        /// </summary>
+        /// <remarks>
+        /// true by default
+        /// </remarks>
+        public bool EnableInitialPluginLoad { get; set; }
+
+        /// <summary>
+        /// Control whether we attempt to load an estate data service.
+        /// </summary>
+        /// <remarks>For tests/debugging</remarks>
+        public bool LoadEstateDataService { get; set; }
+
         protected string proxyUrl;
         protected int proxyOffset = 0;
         
@@ -96,7 +110,7 @@ namespace OpenSim
 
         public ConsoleCommand CreateAccount = null;
 
-        protected List<IApplicationPlugin> m_plugins = new List<IApplicationPlugin>();
+        public List<IApplicationPlugin> m_plugins = new List<IApplicationPlugin>();
 
         /// <value>
         /// The config information passed into the OpenSimulator region server.
@@ -135,6 +149,8 @@ namespace OpenSim
         /// <param name="configSource"></param>
         public OpenSimBase(IConfigSource configSource) : base()
         {
+            EnableInitialPluginLoad = true;
+            LoadEstateDataService = true;
             LoadConfigSettings(configSource);
         }
 
@@ -154,14 +170,37 @@ namespace OpenSim
                 proxyUrl = networkConfig.GetString("proxy_url", "");
                 proxyOffset = Int32.Parse(networkConfig.GetString("proxy_offset", "0"));
             }
+
+            IConfig startupConfig = Config.Configs["Startup"];
+            if (startupConfig != null)
+            {
+                Util.LogOverloads = startupConfig.GetBoolean("LogOverloads", true);
+            }
         }
 
         protected virtual void LoadPlugins()
         {
-            using (PluginLoader<IApplicationPlugin> loader = new PluginLoader<IApplicationPlugin>(new ApplicationPluginInitialiser(this)))
+            IConfig startupConfig = Config.Configs["Startup"];
+            string registryLocation = (startupConfig != null) ? startupConfig.GetString("RegistryLocation", String.Empty) : String.Empty;
+
+            // The location can also be specified in the environment. If there
+            // is no location in the configuration, we must call the constructor
+            // without a location parameter to allow that to happen.
+            if (registryLocation == String.Empty)
             {
-                loader.Load("/OpenSim/Startup");
-                m_plugins = loader.Plugins;
+                using (PluginLoader<IApplicationPlugin> loader = new PluginLoader<IApplicationPlugin>(new ApplicationPluginInitialiser(this)))
+                {
+                    loader.Load("/OpenSim/Startup");
+                    m_plugins = loader.Plugins;
+                }
+            }
+            else
+            {
+                using (PluginLoader<IApplicationPlugin> loader = new PluginLoader<IApplicationPlugin>(new ApplicationPluginInitialiser(this), registryLocation))
+                {
+                    loader.Load("/OpenSim/Startup");
+                    m_plugins = loader.Plugins;
+                }
             }
         }
 
@@ -209,28 +248,29 @@ namespace OpenSim
                         module));
 
             // Load the estate data service
-            IConfig estateDataConfig = Config.Configs["EstateDataStore"];
-            if (estateDataConfig == null)
-                throw new Exception("Configuration file is missing the [EstateDataStore] section.  Have you copied OpenSim.ini.example to OpenSim.ini to reference config-include/ files?");
-
-            module = estateDataConfig.GetString("LocalServiceModule", String.Empty);
+            module = Util.GetConfigVarFromSections<string>(Config, "LocalServiceModule", new string[]{"EstateDataStore", "EstateService"}, String.Empty); 
             if (String.IsNullOrEmpty(module))
-                throw new Exception("Configuration file is missing the LocalServiceModule parameter in the [EstateDataStore] section");
+                throw new Exception("Configuration file is missing the LocalServiceModule parameter in the [EstateDataStore] or [EstateService] section");
 
-            m_estateDataService = ServerUtils.LoadPlugin<IEstateDataService>(module, new object[] { Config });
-            if (m_estateDataService == null)
-                throw new Exception(
-                    string.Format(
-                        "Could not load an IEstateDataService implementation from {0}, as configured in the LocalServiceModule parameter of the [EstateDataStore] config section.", 
-                        module));
+            if (LoadEstateDataService)
+            {
+                m_estateDataService = ServerUtils.LoadPlugin<IEstateDataService>(module, new object[] { Config });
+                if (m_estateDataService == null)
+                    throw new Exception(
+                        string.Format(
+                            "Could not load an IEstateDataService implementation from {0}, as configured in the LocalServiceModule parameter of the [EstateDataStore] config section.", 
+                            module));
+            }
 
             base.StartupSpecific();
 
-            LoadPlugins();
+            if (EnableInitialPluginLoad)
+                LoadPlugins();
+
+            // We still want to post initalize any plugins even if loading has been disabled since a test may have
+            // inserted them manually.
             foreach (IApplicationPlugin plugin in m_plugins)
-            {
                 plugin.PostInitialise();
-            }
 
             if (m_console != null)
                 AddPluginCommands(m_console);
@@ -532,7 +572,7 @@ namespace OpenSim
             else
             {
                 regionInfo.EstateSettings.EstateOwner = account.PrincipalID;
-                regionInfo.EstateSettings.Save();
+                m_estateDataService.StoreEstateSettings(regionInfo.EstateSettings);
             }
         }
 
@@ -690,7 +730,8 @@ namespace OpenSim
             clientServer = clientNetworkServers;
             scene.LoadWorldMap();
 
-            scene.PhysicsScene = GetPhysicsScene(scene.RegionInfo.RegionName);
+            Vector3 regionExtent = new Vector3(regionInfo.RegionSizeX, regionInfo.RegionSizeY, regionInfo.RegionSizeZ);
+            scene.PhysicsScene = GetPhysicsScene(scene.RegionInfo.RegionName, regionExtent);
             scene.PhysicsScene.RequestAssetMethod = scene.PhysicsRequestAsset;
             scene.PhysicsScene.SetTerrain(scene.Heightmap.GetFloatsSerialised());
             scene.PhysicsScene.SetWaterLevel((float) regionInfo.RegionSettings.WaterHeight);
@@ -752,10 +793,10 @@ namespace OpenSim
 
         # region Setup methods
 
-        protected override PhysicsScene GetPhysicsScene(string osSceneIdentifier)
+        protected override PhysicsScene GetPhysicsScene(string osSceneIdentifier, Vector3 regionExtent)
         {
             return GetPhysicsScene(
-                m_configSettings.PhysicsEngine, m_configSettings.MeshEngineName, Config, osSceneIdentifier);
+                m_configSettings.PhysicsEngine, m_configSettings.MeshEngineName, Config, osSceneIdentifier, regionExtent);
         }
 
         /// <summary>
@@ -854,6 +895,9 @@ namespace OpenSim
             try
             {
                 SceneManager.Close();
+
+                foreach (IApplicationPlugin plugin in m_plugins)
+                    plugin.Dispose();
             }
             catch (Exception e)
             {
@@ -926,7 +970,7 @@ namespace OpenSim
             // back to the default.  The reloading of estate settings by scene could be eliminated if it
             // knows that the passed in settings in RegionInfo are already valid.  Also, it might be 
             // possible to eliminate some additional later saves made by callers of this method.
-            regInfo.EstateSettings.Save();   
+            EstateDataService.StoreEstateSettings(regInfo.EstateSettings);   
             
             return true;
         }

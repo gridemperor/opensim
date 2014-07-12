@@ -426,7 +426,7 @@ public sealed class BSCharacter : BSPhysObject
             m_targetVelocity = value;
             OMV.Vector3 targetVel = value;
             if (_setAlwaysRun && !_flying)
-                targetVel *= new OMV.Vector3(BSParam.AvatarAlwaysRunFactor, BSParam.AvatarAlwaysRunFactor, 0f);
+                targetVel *= new OMV.Vector3(BSParam.AvatarAlwaysRunFactor, BSParam.AvatarAlwaysRunFactor, 1f);
 
             if (m_moveActor != null)
                 m_moveActor.SetVelocityAndTarget(RawVelocity, targetVel, false /* inTaintTime */);
@@ -657,7 +657,7 @@ public sealed class BSCharacter : BSPhysObject
 
     private OMV.Vector3 ComputeAvatarScale(OMV.Vector3 size)
     {
-        OMV.Vector3 newScale;
+        OMV.Vector3 newScale = size;
 
         // Bullet's capsule total height is the "passed height + radius * 2";
         // The base capsule is 1 unit in diameter and 2 units in height (passed radius=0.5, passed height = 1)
@@ -670,8 +670,6 @@ public sealed class BSCharacter : BSPhysObject
         //     for a asymmetrical capsule, other parts of the code presume it is cylindrical.
 
         // Scale is multiplier of radius with one of "0.5"
-        newScale.X = size.X / 2f;
-        newScale.Y = size.Y / 2f;
 
         float heightAdjust = BSParam.AvatarHeightMidFudge;
         if (BSParam.AvatarHeightLowFudge != 0f || BSParam.AvatarHeightHighFudge != 0f)
@@ -692,8 +690,17 @@ public sealed class BSCharacter : BSPhysObject
                 heightAdjust += ((midHeightOffset) / (AVATAR_HI - AVATAR_MID)) * BSParam.AvatarHeightHighFudge;
             }
         }
-        // The total scale height is the central cylindar plus the caps on the two ends.
-        newScale.Z = (size.Z + (Math.Min(size.X, size.Y) * 2) + heightAdjust) / 2f;
+        if (BSParam.AvatarShape == BSShapeCollection.AvatarShapeCapsule)
+        {
+            newScale.X = size.X / 2f;
+            newScale.Y = size.Y / 2f;
+            // The total scale height is the central cylindar plus the caps on the two ends.
+            newScale.Z = (size.Z + (Math.Min(size.X, size.Y) * 2) + heightAdjust) / 2f;
+        }
+        else
+        {
+            newScale.Z = size.Z + heightAdjust;
+        }
         // m_log.DebugFormat("{0} ComputeAvatarScale: size={1},adj={2},scale={3}", LogHeader, size, heightAdjust, newScale);
 
         // If smaller than the endcaps, just fake like we're almost that small
@@ -737,7 +744,18 @@ public sealed class BSCharacter : BSPhysObject
         //    and will send agent updates to the clients if velocity changes by more than
         //    0.001m/s. Bullet introduces a lot of jitter in the velocity which causes many
         //    extra updates.
-        if (!entprop.Velocity.ApproxEquals(RawVelocity, 0.1f))
+        //
+        // XXX: Contrary to the above comment, setting an update threshold here above 0.4 actually introduces jitter to 
+        // avatar movement rather than removes it.  The larger the threshold, the bigger the jitter.
+        // This is most noticeable in level flight and can be seen with
+        // the "show updates" option in a viewer.  With an update threshold, the RawVelocity cycles between a lower
+        // bound and an upper bound, where the difference between the two is enough to trigger a large delta v update
+        // and subsequently trigger an update in ScenePresence.SendTerseUpdateToAllClients().  The cause of this cycle (feedback?)
+        // has not yet been identified.
+        //
+        // If there is a threshold below 0.4 or no threshold check at all (as in ODE), then RawVelocity stays constant and extra
+        // updates are not triggered in ScenePresence.SendTerseUpdateToAllClients().
+//        if (!entprop.Velocity.ApproxEquals(RawVelocity, 0.1f))
             RawVelocity = entprop.Velocity;
 
         _acceleration = entprop.Acceleration;

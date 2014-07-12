@@ -42,7 +42,9 @@ namespace OpenSim.Region.Physics.BulletSPlugin
 {
     public sealed class BSDynamics : BSActor
     {
+#pragma warning disable 414
         private static string LogHeader = "[BULLETSIM VEHICLE]";
+#pragma warning restore 414
 
         // the prim this dynamic controller belongs to
         private BSPrimLinkable ControllingPrim { get; set; }
@@ -123,7 +125,9 @@ namespace OpenSim.Region.Physics.BulletSPlugin
 
         // Just some recomputed constants:
         static readonly float PIOverFour = ((float)Math.PI) / 4f;
+#pragma warning disable 414
         static readonly float PIOverTwo = ((float)Math.PI) / 2f;
+#pragma warning restore 414
 
         public BSDynamics(BSScene myScene, BSPrim myPrim, string actorName)
             : base(myScene, myPrim, actorName)
@@ -1011,8 +1015,13 @@ namespace OpenSim.Region.Physics.BulletSPlugin
                 VDetailLog("{0},  MoveLinear,clampMax,origVelW={1},lenSq={2},maxVelSq={3},,newVelW={4}",
                             ControllingPrim.LocalID, origVelW, newVelocityLengthSq, BSParam.VehicleMaxLinearVelocitySquared, VehicleVelocity);
             }
-            else if (newVelocityLengthSq < 0.001f)
+            else if (newVelocityLengthSq < BSParam.VehicleMinLinearVelocitySquared)
+            {
+                Vector3 origVelW = VehicleVelocity;         // DEBUG DEBUG
+                VDetailLog("{0},  MoveLinear,clampMin,origVelW={1},lenSq={2}",
+                            ControllingPrim.LocalID, origVelW, newVelocityLengthSq);
                 VehicleVelocity = Vector3.Zero;
+            }
 
             VDetailLog("{0},  MoveLinear,done,isColl={1},newVel={2}", ControllingPrim.LocalID, ControllingPrim.HasSomeCollision, VehicleVelocity );
 
@@ -1106,7 +1115,7 @@ namespace OpenSim.Region.Physics.BulletSPlugin
         {
             // m_VhoverEfficiency: 0=bouncy, 1=totally damped
             // m_VhoverTimescale: time to achieve height
-            if ((m_flags & (VehicleFlag.HOVER_WATER_ONLY | VehicleFlag.HOVER_TERRAIN_ONLY | VehicleFlag.HOVER_GLOBAL_HEIGHT)) != 0)
+            if ((m_flags & (VehicleFlag.HOVER_WATER_ONLY | VehicleFlag.HOVER_TERRAIN_ONLY | VehicleFlag.HOVER_GLOBAL_HEIGHT)) != 0 && (m_VhoverHeight > 0) && (m_VhoverTimescale < 300))
             {
                 // We should hover, get the target height
                 if ((m_flags & VehicleFlag.HOVER_WATER_ONLY) != 0)

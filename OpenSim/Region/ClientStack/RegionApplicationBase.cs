@@ -39,6 +39,7 @@ using OpenSim.Region.Framework;
 using OpenSim.Region.Framework.Interfaces;
 using OpenSim.Region.Framework.Scenes;
 using OpenSim.Region.Physics.Manager;
+using OpenSim.Services.Interfaces;
 
 namespace OpenSim.Region.ClientStack
 {
@@ -69,7 +70,7 @@ namespace OpenSim.Region.ClientStack
         /// The name of the OpenSim scene this physics scene is serving.  This will be used in log messages.
         /// </param>
         /// <returns></returns>
-        protected abstract PhysicsScene GetPhysicsScene(string osSceneIdentifier);
+        protected abstract PhysicsScene GetPhysicsScene(string osSceneIdentifier, Vector3 regionExtent);
         
         protected abstract ClientStackManager CreateClientStackManager();
         protected abstract Scene CreateScene(RegionInfo regionInfo, ISimulationDataService simDataService, IEstateDataService estateDataService, AgentCircuitManager circuitManager);
@@ -123,13 +124,13 @@ namespace OpenSim.Region.ClientStack
         /// </param>
         /// <returns></returns>
         protected PhysicsScene GetPhysicsScene(
-            string engine, string meshEngine, IConfigSource config, string osSceneIdentifier)
+            string engine, string meshEngine, IConfigSource config, string osSceneIdentifier, Vector3 regionExtent)
         {
             PhysicsPluginManager physicsPluginManager;
             physicsPluginManager = new PhysicsPluginManager();
             physicsPluginManager.LoadPluginsFromAssemblies("Physics");
             
-            return physicsPluginManager.GetPhysicsScene(engine, meshEngine, config, osSceneIdentifier);
+            return physicsPluginManager.GetPhysicsScene(engine, meshEngine, config, osSceneIdentifier, regionExtent);
         }
     }
 }

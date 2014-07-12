@@ -52,6 +52,7 @@ namespace OpenSim.Region.Framework.Scenes
     public class SceneCommunicationService //one instance per region
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+        private static string LogHeader = "[SCENE COMMUNIATION SERVICE]";
 
         protected RegionInfo m_regionInfo;
         protected Scene m_scene;
@@ -84,15 +85,12 @@ namespace OpenSim.Region.Framework.Scenes
             if (neighbourService != null)
                 neighbour = neighbourService.HelloNeighbour(regionhandle, region);
             else
-                m_log.DebugFormat(
-                    "[SCENE COMMUNICATION SERVICE]: No neighbour service provided for region {0} to inform neigbhours of status",
-                    m_scene.Name);
+                m_log.DebugFormat( "{0} neighbour service provided for region {0} to inform neigbhours of status", LogHeader, m_scene.Name);
 
             if (neighbour != null)
             {
-                m_log.DebugFormat(
-                    "[SCENE COMMUNICATION SERVICE]: Region {0} successfully informed neighbour {1} at {2}-{3} that it is up",
-                    m_scene.Name, neighbour.RegionName, x / Constants.RegionSize, y / Constants.RegionSize);
+                m_log.DebugFormat( "{0} Region {1} successfully informed neighbour {2} at {3}-{4} that it is up",
+                    LogHeader, m_scene.Name, neighbour.RegionName, Util.WorldToRegionLoc(x), Util.WorldToRegionLoc(y));
 
                 m_scene.EventManager.TriggerOnRegionUp(neighbour);
             }
@@ -100,7 +98,7 @@ namespace OpenSim.Region.Framework.Scenes
             {
                 m_log.WarnFormat(
                     "[SCENE COMMUNICATION SERVICE]: Region {0} failed to inform neighbour at {1}-{2} that it is up.",
-                    m_scene.Name, x / Constants.RegionSize, y / Constants.RegionSize);
+                    m_scene.Name, Util.WorldToRegionLoc(x), Util.WorldToRegionLoc(y));
             }
         }
 
@@ -111,9 +109,7 @@ namespace OpenSim.Region.Framework.Scenes
             List<GridRegion> neighbours
                 = m_scene.GridService.GetNeighbours(m_scene.RegionInfo.ScopeID, m_scene.RegionInfo.RegionID);
 
-            m_log.DebugFormat(
-                "[SCENE COMMUNICATION SERVICE]: Informing {0} neighbours that region {1} is up",
-                neighbours.Count, m_scene.Name);
+            m_log.DebugFormat("{0} Informing {1} neighbours that region {2} is up", LogHeader, neighbours.Count, m_scene.Name);
 
             foreach (GridRegion n in neighbours)
             {
@@ -166,7 +162,7 @@ namespace OpenSim.Region.Framework.Scenes
                         // we only want to send one update to each simulator; the simulator will
                         // hand it off to the regions where a child agent exists, this does assume
                         // that the region position is cached or performance will degrade
-                        Utils.LongToUInts(regionHandle, out x, out y);
+                        Util.RegionHandleToWorldLoc(regionHandle, out x, out y);
                         GridRegion dest = m_scene.GridService.GetRegionByPosition(UUID.Zero, (int)x, (int)y);
                         if (dest == null)
                             continue;
@@ -203,7 +199,7 @@ namespace OpenSim.Region.Framework.Scenes
 
             //m_commsProvider.InterRegion.TellRegionToCloseChildConnection(regionHandle, agentID);
             uint x = 0, y = 0;
-            Utils.LongToUInts(regionHandle, out x, out y);
+            Util.RegionHandleToWorldLoc(regionHandle, out x, out y);
 
             GridRegion destination = m_scene.GridService.GetRegionByPosition(m_regionInfo.ScopeID, (int)x, (int)y);
 

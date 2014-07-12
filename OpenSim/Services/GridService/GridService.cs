@@ -46,6 +46,7 @@ namespace OpenSim.Services.GridService
         private static readonly ILog m_log =
                 LogManager.GetLogger(
                 MethodBase.GetCurrentMethod().DeclaringType);
+        private string LogHeader = "[GRID SERVICE]";
 
         private bool m_DeleteOnUnregister = true;
         private static GridService m_RootInstance = null;
@@ -117,12 +118,19 @@ namespace OpenSim.Services.GridService
                             "For example, show region at 1000 1000",
                             HandleShowRegionAt);
 
-                    MainConsole.Instance.Commands.AddCommand("Regions", true,
-                            "set region flags",
-                            "set region flags <Region name> <flags>",
-                            "Set database flags for region",
+                    MainConsole.Instance.Commands.AddCommand("General", true,
+                            "show grid size",
+                            "show grid size",
+                            "Show the current grid size (excluding hyperlink references)",
                             String.Empty,
-                            HandleSetFlags);
+                            HandleShowGridSize);
+
+                    MainConsole.Instance.Commands.AddCommand("Regions", true,
+                             "set region flags",
+                             "set region flags <Region name> <flags>",
+                             "Set database flags for region",
+                             String.Empty,
+                             HandleSetFlags);
                 }
                 m_HypergridLinker = new HypergridLinker(m_config, this, m_Database);
             }
@@ -313,8 +321,10 @@ namespace OpenSim.Services.GridService
             if (region != null)
             {
                 // Not really? Maybe?
-                List<RegionData> rdatas = m_Database.Get(region.posX - (int)Constants.RegionSize - 1, region.posY - (int)Constants.RegionSize - 1, 
-                    region.posX + (int)Constants.RegionSize + 1, region.posY + (int)Constants.RegionSize + 1, scopeID);
+                // The adjacent regions are presumed to be the same size as the current region
+                List<RegionData> rdatas = m_Database.Get(
+                    region.posX - region.sizeX - 1, region.posY - region.sizeY - 1, 
+                    region.posX + region.sizeX + 1, region.posY + region.sizeY + 1, scopeID);
 
                 foreach (RegionData rdata in rdatas)
                 {
@@ -326,7 +336,11 @@ namespace OpenSim.Services.GridService
                     }
                 }
 
-//                m_log.DebugFormat("[GRID SERVICE]: region {0} has {1} neighbours", region.RegionName, rinfos.Count);
+                // string rNames = "";
+                // foreach (GridRegion gr in rinfos)
+                //     rNames += gr.RegionName + ",";
+                // m_log.DebugFormat("{0} region {1} has {2} neighbours ({3})",
+                //             LogHeader, region.RegionName, rinfos.Count, rNames);
             }
             else
             {
@@ -347,6 +361,11 @@ namespace OpenSim.Services.GridService
             return null;
         }
 
+        // Get a region given its base coordinates.
+        // NOTE: this is NOT 'get a region by some point in the region'. The coordinate MUST
+        //     be the base coordinate of the region.
+        // The snapping is technically unnecessary but is harmless because regions are always
+        //     multiples of the legacy region size (256).
         public GridRegion GetRegionByPosition(UUID scopeID, int x, int y)
         {
             int snapX = (int)(x / Constants.RegionSize) * (int)Constants.RegionSize;
@@ -441,6 +460,8 @@ namespace OpenSim.Services.GridService
             RegionData rdata = new RegionData();
             rdata.posX = (int)rinfo.RegionLocX;
             rdata.posY = (int)rinfo.RegionLocY;
+            rdata.sizeX = rinfo.RegionSizeX;
+            rdata.sizeY = rinfo.RegionSizeY;
             rdata.RegionID = rinfo.RegionID;
             rdata.RegionName = rinfo.RegionName;
             rdata.Data = rinfo.ToKeyValuePairs();
@@ -454,6 +475,8 @@ namespace OpenSim.Services.GridService
             GridRegion rinfo = new GridRegion(rdata.Data);
             rinfo.RegionLocX = rdata.posX;
             rinfo.RegionLocY = rdata.posY;
+            rinfo.RegionSizeX = rdata.sizeX;
+            rinfo.RegionSizeY = rdata.sizeY;
             rinfo.RegionID = rdata.RegionID;
             rinfo.RegionName = rdata.RegionName;
             rinfo.ScopeID = rdata.ScopeID;
@@ -604,6 +627,27 @@ namespace OpenSim.Services.GridService
             OutputRegionsToConsoleSummary(regions);
         }
 
+        private void HandleShowGridSize(string module, string[] cmd)
+        {
+            List<RegionData> regions = m_Database.Get(int.MinValue, int.MinValue, int.MaxValue, int.MaxValue, UUID.Zero);
+
+            double size = 0;
+
+            foreach (RegionData region in regions)
+            {
+                int flags = Convert.ToInt32(region.Data["flags"]);
+
+                if ((flags & (int)Framework.RegionFlags.Hyperlink) == 0)
+                    size += region.sizeX * region.sizeY;
+            }
+
+            MainConsole.Instance.Output("This is a very rough approximation.");
+            MainConsole.Instance.Output("Although it will not count regions that are actually links to others over the Hypergrid, ");
+            MainConsole.Instance.Output("it will count regions that are inactive but were not deregistered from the grid service");
+            MainConsole.Instance.Output("(e.g. simulator crashed rather than shutting down cleanly).\n");
+
+            MainConsole.Instance.OutputFormat("Grid size: {0} km squared.", size / 1000000);
+        }
 
         private void HandleShowRegion(string module, string[] cmd)
         {
@@ -633,20 +677,20 @@ namespace OpenSim.Services.GridService
                 return;
             }
 
-            int x, y;
-            if (!int.TryParse(cmd[3], out x))
+            uint x, y;
+            if (!uint.TryParse(cmd[3], out x))
             {
                 MainConsole.Instance.Output("x-coord must be an integer");
                 return;
             }
 
-            if (!int.TryParse(cmd[4], out y))
+            if (!uint.TryParse(cmd[4], out y))
             {
                 MainConsole.Instance.Output("y-coord must be an integer");
                 return;
             }
 
-            RegionData region = m_Database.Get(x * (int)Constants.RegionSize, y * (int)Constants.RegionSize, UUID.Zero);
+            RegionData region = m_Database.Get((int)Util.RegionToWorldLoc(x), (int)Util.RegionToWorldLoc(y), UUID.Zero);
             if (region == null)
             {
                 MainConsole.Instance.OutputFormat("No region found at {0},{1}", x, y);
@@ -663,7 +707,8 @@ namespace OpenSim.Services.GridService
             ConsoleDisplayList dispList = new ConsoleDisplayList();
             dispList.AddRow("Region Name", r.RegionName);
             dispList.AddRow("Region ID", r.RegionID);
-            dispList.AddRow("Location", string.Format("{0},{1}", r.coordX, r.coordY));
+            dispList.AddRow("Position", string.Format("{0},{1}", r.coordX, r.coordY));
+            dispList.AddRow("Size", string.Format("{0}x{1}", r.sizeX, r.sizeY));
             dispList.AddRow("URI", r.Data["serverURI"]);
             dispList.AddRow("Owner ID", r.Data["owner_uuid"]);
             dispList.AddRow("Flags", flags);
@@ -680,10 +725,10 @@ namespace OpenSim.Services.GridService
         private void OutputRegionsToConsoleSummary(List<RegionData> regions)
         {
             ConsoleDisplayTable dispTable = new ConsoleDisplayTable();
-            dispTable.AddColumn("Name", 16);
+            dispTable.AddColumn("Name", 44);
             dispTable.AddColumn("ID", 36);
             dispTable.AddColumn("Position", 11);
-            dispTable.AddColumn("Owner ID", 36);
+            dispTable.AddColumn("Size", 11);
             dispTable.AddColumn("Flags", 60);
 
             foreach (RegionData r in regions)
@@ -693,7 +738,7 @@ namespace OpenSim.Services.GridService
                     r.RegionName,
                     r.RegionID.ToString(),
                     string.Format("{0},{1}", r.coordX, r.coordY),
-                    r.Data["owner_uuid"].ToString(),
+                    string.Format("{0}x{1}", r.sizeX, r.sizeY),
                     flags.ToString());
             }
 

@@ -66,7 +66,7 @@ namespace OpenSim.OfflineIM
             if (serviceLocation == string.Empty)
                 m_OfflineIMService = new OfflineIMService(config);
             else
-                m_OfflineIMService = new OfflineIMServiceRemoteConnector(serviceLocation);
+                m_OfflineIMService = new OfflineIMServiceRemoteConnector(config);
 
             m_ForwardOfflineGroupMessages = cnf.GetBoolean("ForwardOfflineGroupMessages", m_ForwardOfflineGroupMessages);
             m_log.DebugFormat("[OfflineIM.V2]: Offline messages enabled by {0}", Name);
@@ -226,10 +226,6 @@ namespace OpenSim.OfflineIM
                     return;
             }
 
-            Scene scene = FindScene(new UUID(im.fromAgentID));
-            if (scene == null)
-                scene = m_SceneList[0];
-
             string reason = string.Empty;
             bool success = m_OfflineIMService.StoreMessage(im, out reason);
 
@@ -259,6 +255,11 @@ namespace OpenSim.OfflineIM
         public bool StoreMessage(GridInstantMessage im, out string reason)
         {
             return m_OfflineIMService.StoreMessage(im, out reason);
+        }
+
+        public void DeleteMessages(UUID userID)
+        {
+            m_OfflineIMService.DeleteMessages(userID);
         }
 
         #endregion

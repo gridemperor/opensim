@@ -35,6 +35,10 @@ namespace OpenSim.Framework
     /// </summary>
     public class InventoryItemBase : InventoryNodeBase, ICloneable
     {
+        public static readonly string SUITCASE_FOLDER_NAME = "My Suitcase";
+        public static readonly sbyte SUITCASE_FOLDER_TYPE = 100;
+        public static readonly sbyte SUITCASE_FOLDER_FAKE_TYPE = 8;
+        
         /// <value>
         /// The inventory type of the item.  This is slightly different from the asset type in some situations.
         /// </value>
@@ -82,12 +86,15 @@ namespace OpenSim.Framework
             set
             {
                 m_creatorId = value;
+                
+                if ((m_creatorId == null) || !UUID.TryParse(m_creatorId, out m_creatorIdAsUuid))
+                    m_creatorIdAsUuid = UUID.Zero;
             }
         }
         protected string m_creatorId;
 
         /// <value>
-        /// The CreatorId expressed as a UUID.tely
+        /// The CreatorId expressed as a UUID.
         /// </value>
         public UUID CreatorIdAsUuid 
         {

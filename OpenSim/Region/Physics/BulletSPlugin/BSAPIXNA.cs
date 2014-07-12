@@ -1311,7 +1311,7 @@ private sealed class BulletConstraintXNA : BulletConstraint
         /* TODO */
         ConfigurationParameters[] configparms = new ConfigurationParameters[1];
         configparms[0] = parms;
-        Vector3 worldExtent = new Vector3(Constants.RegionSize, Constants.RegionSize, Constants.RegionHeight);
+        Vector3 worldExtent = maxPosition;
         m_maxCollisions = maxCollisions;
         m_maxUpdatesPerFrame = maxUpdates;
         specialCollisionObjects = new Dictionary<uint, GhostObject>();
@@ -2255,7 +2255,6 @@ private sealed class BulletConstraintXNA : BulletConstraint
             world.LastCollisionDesc = 0;
             world.LastEntityProperty = 0;
             numSimSteps = world.StepSimulation(timeStep, m_maxSubSteps, m_fixedTimeStep);
-            int updates = 0;
 
             PersistentManifold contactManifold;
             CollisionObject objA;

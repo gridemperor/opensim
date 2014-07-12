@@ -32,27 +32,47 @@ using System.Reflection;
 using System.Text;
 
 using OpenSim.Framework;
+using OpenSim.Framework.ServiceAuth;
 using OpenSim.Server.Base;
 
 using OpenMetaverse;
 using log4net;
+using Nini.Config;
 
 namespace OpenSim.Groups
 {
-    public class GroupsServiceRemoteConnector
+    public class GroupsServiceRemoteConnector 
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
         private string m_ServerURI;
+        private IServiceAuth m_Auth;
         private object m_Lock = new object();
 
-        public GroupsServiceRemoteConnector(string url)
+        public GroupsServiceRemoteConnector(IConfigSource config)
         {
+            IConfig groupsConfig = config.Configs["Groups"];
+            string url = groupsConfig.GetString("GroupsServerURI", string.Empty);
+            if (!Uri.IsWellFormedUriString(url, UriKind.Absolute))
+                throw new Exception(string.Format("[Groups.RemoteConnector]: Malformed groups server URL {0}. Fix it or disable the Groups feature.", url));
+
             m_ServerURI = url;
             if (!m_ServerURI.EndsWith("/"))
                 m_ServerURI += "/";
 
-            m_log.DebugFormat("[Groups.RemoteConnector]: Groups server at {0}", m_ServerURI);
+            /// This is from BaseServiceConnector
+            string authType = Util.GetConfigVarFromSections<string>(config, "AuthType", new string[] { "Network", "Groups" }, "None");
+
+            switch (authType)
+            {
+                case "BasicHttpAuthentication":
+                    m_Auth = new BasicHttpAuthentication(config, "Groups");
+                    break;
+            }
+            ///
+
+            m_log.DebugFormat("[Groups.RemoteConnector]: Groups server at {0}, authentication {1}", 
+                m_ServerURI, (m_Auth == null ? "None" : m_Auth.GetType().ToString()));
         }
 
         public ExtendedGroupRecord CreateGroup(string RequestingAgentID, string name, string charter, bool showInList, UUID insigniaID, int membershipFee, bool openEnrollment,
@@ -106,7 +126,7 @@ namespace OpenSim.Groups
             sendData["OP"] = "UPDATE";
             Dictionary<string, object> ret = MakeRequest("PUTGROUP", sendData);
 
-            if (ret == null || (ret != null && ret["RESULT"].ToString() == "NULL"))
+            if (ret == null || (ret != null && (!ret.ContainsKey("RESULT") || ret["RESULT"].ToString() == "NULL")))
                 return null;
 
             return GroupsDataUtils.GroupRecord((Dictionary<string, object>)ret["RESULT"]);
@@ -127,7 +147,7 @@ namespace OpenSim.Groups
 
             Dictionary<string, object> ret = MakeRequest("GETGROUP", sendData);
 
-            if (ret == null || (ret != null && ret["RESULT"].ToString() == "NULL"))
+            if (ret == null || (ret != null && (!ret.ContainsKey("RESULT") || ret["RESULT"].ToString() == "NULL")))
                 return null;
 
             return GroupsDataUtils.GroupRecord((Dictionary<string, object>)ret["RESULT"]);
@@ -267,6 +287,7 @@ namespace OpenSim.Groups
 
             if (ret["RESULT"].ToString() == "NULL")
                 return members;
+
             foreach (object v in ((Dictionary<string, object>)ret["RESULT"]).Values)
             {
                 ExtendedGroupMembersData m = GroupsDataUtils.GroupMembersData((Dictionary<string, object>)v);
@@ -357,6 +378,7 @@ namespace OpenSim.Groups
 
             if (ret["RESULT"].ToString() == "NULL")
                 return roles;
+
             foreach (object v in ((Dictionary<string, object>)ret["RESULT"]).Values)
             {
                 GroupRolesData m = GroupsDataUtils.GroupRolesData((Dictionary<string, object>)v);
@@ -657,7 +679,8 @@ namespace OpenSim.Groups
             lock (m_Lock)
                 reply = SynchronousRestFormsRequester.MakeRequest("POST",
                          m_ServerURI + "groups",
-                         ServerUtils.BuildQueryString(sendData));
+                         ServerUtils.BuildQueryString(sendData),
+                         m_Auth);
 
             if (reply == string.Empty)
                 return null;
@@ -667,7 +690,7 @@ namespace OpenSim.Groups
 
             return replyData;
         }
-        #endregion
 
+        #endregion
     }
 }

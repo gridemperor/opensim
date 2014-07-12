@@ -59,6 +59,8 @@ MapGetServiceConnector = "8002/OpenSim.Server.Handlers.dll:MapGetServiceConnecto
 ; OfflineIMServiceConnector = "8003/OpenSim.Addons.OfflineIM.dll:OfflineIMServiceRobustConnector"
 ;; Uncomment this if you want Groups V2 to work
 ; GroupsServiceConnector = "8003/OpenSim.Addons.Groups.dll:GroupsServiceRobustConnector"
+;; Uncomment to provide bakes caching
+;BakedTextureService = "8003/OpenSim.Server.Handlers.dll:XBakesConnector"
 
 ;; Additions for Hypergrid
 
@@ -101,6 +103,21 @@ HGAssetServiceConnector = "HGAssetService@8002/OpenSim.Server.Handlers.dll:Asset
     ;
     ; Password for cert
     ; cert_pass = "password"
+
+	;; The follow 3 variables are for HTTP Basic Authentication for the Robust services.
+	;; Use this if your central services in port 8003 need to be accessible on the Internet
+	;; but you want to protect them from unauthorized access.
+    ; AuthType = "BasicHttpAuthentication"
+    ; HttpAuthUsername = "some_username"
+    ; HttpAuthPassword = "some_password"
+	;;
+	;; AuthType above can be overriden in any of the service sections below by
+	; AuthType = "None"
+	;; This is useful in cases where you want to protect most of the services,
+	;; but unprotect individual services. Username and Password can also be
+	;; overriden if you want to use different credentials for the different services.
+	;; Hypgergrid services are not affected by this; they are publicly available 
+	;; by design.
 
 
 ; * The following are for the remote console
@@ -160,8 +177,6 @@ HGAssetServiceConnector = "HGAssetService@8002/OpenSim.Server.Handlers.dll:Asset
 ; *
 [GridService]
     LocalServiceModule = "OpenSim.Services.GridService.dll:GridService"
-
-    HypergridLinker = true
 
     ; Realm = "regions"
     ; AllowDuplicateNames = "True"
@@ -282,6 +297,7 @@ HGAssetServiceConnector = "HGAssetService@8002/OpenSim.Server.Handlers.dll:Asset
     GridService = "OpenSim.Services.GridService.dll:GridService"
     InventoryService = "OpenSim.Services.InventoryService.dll:XInventoryService"
     AvatarService = "OpenSim.Services.AvatarService.dll:AvatarService"
+    GridUserService = "OpenSim.Services.UserAccountService.dll:GridUserService"
 
     ;; This switch creates the minimum set of body parts and avatar entries for a viewer 2 
     ;; to show a default "Ruth" avatar rather than a cloud for a newly created user.
@@ -332,6 +348,10 @@ HGAssetServiceConnector = "HGAssetService@8002/OpenSim.Server.Handlers.dll:Asset
     LibraryService = "OpenSim.Services.InventoryService.dll:LibraryService"
     UserAgentService = "OpenSim.Services.HypergridService.dll:UserAgentService"
     FriendsService = "OpenSim.Services.FriendsService.dll:FriendsService"
+
+    ; This inventory service will be used to initialize the user's inventory
+    HGInventoryServicePlugin = "OpenSim.Services.HypergridService.dll:HGSuitcaseInventoryService"
+    HGInventoryServiceConstructorArg = "HGInventoryService"
 
     ;; Ask co-operative viewers to use a different currency name
     ;Currency = ""
@@ -551,6 +571,12 @@ HGAssetServiceConnector = "HGAssetService@8002/OpenSim.Server.Handlers.dll:Asset
     ;; Leave blank or commented for no exceptions.
     ; AllowExcept_Level_200 = "http://griefer.com:8002, http://enemy.com:8002"
 
+	;; This variable controls what is exposed to profiles of local users
+	;; as seen from outside of this grid. Leave it uncommented for exposing
+	;; UserTitle, UserFlags and the creation date. Uncomment and change to False
+	;; to block this info from being exposed.
+	; ShowUserDetailsInHGProfile = True
+
 
 ; * The interface that local users get when they are in other grids.
 ; * This restricts the inventory operations while in other grids.
@@ -633,4 +659,9 @@ HGAssetServiceConnector = "HGAssetService@8002/OpenSim.Server.Handlers.dll:Asset
     ;; Realm = UserProfiles
     UserAccountService = OpenSim.Services.UserAccountService.dll:UserAccountService
     AuthenticationServiceModule = "OpenSim.Services.AuthenticationService.dll:PasswordAuthenticationService"
+	
+[BakedTextureService]
+    LocalServiceModule = "OpenSim.Server.Handlers.dll:XBakes"
+    ;; This directory must exist and be writable for the user ROBUST runs as
+    BaseDirectory = "/data/bakes"
 

@@ -75,6 +75,7 @@ namespace OpenSim.Services.HypergridService
         protected static string m_GridName;
 
         protected static int m_LevelOutsideContacts;
+        protected static bool m_ShowDetails;
 
         protected static bool m_BypassClientVerification;
 
@@ -128,6 +129,7 @@ namespace OpenSim.Services.HypergridService
                 m_UserAccountService = ServerUtils.LoadPlugin<IUserAccountService>(userAccountService, args);
 
                 m_LevelOutsideContacts = serverConfig.GetInt("LevelOutsideContacts", 0);
+                m_ShowDetails = serverConfig.GetBoolean("ShowUserDetailsInHGProfile", true);
 
                 LoadTripPermissionsFromConfig(serverConfig, "ForeignTripsAllowed");
                 LoadDomainExceptionsFromConfig(serverConfig, "AllowExcept", m_TripsAllowedExceptions);
@@ -215,7 +217,7 @@ namespace OpenSim.Services.HypergridService
             return home;
         }
 
-        public bool LoginAgentToGrid(AgentCircuitData agentCircuit, GridRegion gatekeeper, GridRegion finalDestination, bool fromLogin, out string reason)
+        public bool LoginAgentToGrid(GridRegion source, AgentCircuitData agentCircuit, GridRegion gatekeeper, GridRegion finalDestination, bool fromLogin, out string reason)
         {
             m_log.DebugFormat("[USER AGENT SERVICE]: Request to login user {0} {1} (@{2}) to grid {3}", 
                 agentCircuit.firstname, agentCircuit.lastname, (fromLogin ? agentCircuit.IPAddress : "stored IP"), gatekeeper.ServerURI);
@@ -274,13 +276,12 @@ namespace OpenSim.Services.HypergridService
             m_log.DebugFormat("[USER AGENT SERVICE]: this grid: {0}, desired grid: {1}, desired region: {2}", m_GridName, gridName, region.RegionID);
 
             if (m_GridName == gridName)
-                success = m_GatekeeperService.LoginAgent(agentCircuit, finalDestination, out reason);
+            {
+                success = m_GatekeeperService.LoginAgent(source, agentCircuit, finalDestination, out reason);
+            }
             else
             {
-                success = m_GatekeeperConnector.CreateAgent(region, agentCircuit, (uint)Constants.TeleportFlags.ViaLogin, out myExternalIP, out reason);
-                if (success)
-                    // Report them as nowhere
-                    m_PresenceService.ReportAgent(agentCircuit.SessionID, UUID.Zero);
+                success = m_GatekeeperConnector.CreateAgent(source, region, agentCircuit, (uint)Constants.TeleportFlags.ViaLogin, out myExternalIP, out reason);
             }
 
             if (!success)
@@ -307,10 +308,10 @@ namespace OpenSim.Services.HypergridService
             return true;
         }
 
-        public bool LoginAgentToGrid(AgentCircuitData agentCircuit, GridRegion gatekeeper, GridRegion finalDestination, out string reason)
+        public bool LoginAgentToGrid(GridRegion source, AgentCircuitData agentCircuit, GridRegion gatekeeper, GridRegion finalDestination, out string reason)
         {
             reason = string.Empty;
-            return LoginAgentToGrid(agentCircuit, gatekeeper, finalDestination, false, out reason);
+            return LoginAgentToGrid(source, agentCircuit, gatekeeper, finalDestination, false, out reason);
         }
 
         TravelingAgentInfo CreateTravelInfo(AgentCircuitData agentCircuit, GridRegion region, bool fromLogin, out TravelingAgentInfo existing)
@@ -572,10 +573,22 @@ namespace OpenSim.Services.HypergridService
 
             if (account != null)
             {
-                info.Add("user_flags", (object)account.UserFlags);
-                info.Add("user_created", (object)account.Created);
-                info.Add("user_title", (object)account.UserTitle);
+                info.Add("user_firstname", account.FirstName);
+                info.Add("user_lastname", account.LastName);
                 info.Add("result", "success");
+
+                if (m_ShowDetails)
+                {
+                    info.Add("user_flags", account.UserFlags);
+                    info.Add("user_created", account.Created);
+                    info.Add("user_title", account.UserTitle);
+                }
+                else
+                {
+                    info.Add("user_flags", 0);
+                    info.Add("user_created", 0);
+                    info.Add("user_title", string.Empty);
+                }
             }
 
             return info;

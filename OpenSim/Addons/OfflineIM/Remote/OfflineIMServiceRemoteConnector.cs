@@ -32,6 +32,7 @@ using System.Reflection;
 using System.Text;
 
 using OpenSim.Framework;
+using OpenSim.Framework.ServiceAuth;
 using OpenSim.Server.Base;
 using OpenSim.Services.Interfaces;
 
@@ -46,6 +47,7 @@ namespace OpenSim.OfflineIM
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
         private string m_ServerURI = string.Empty;
+        private IServiceAuth m_Auth;
         private object m_Lock = new object();
 
         public OfflineIMServiceRemoteConnector(string url)
@@ -65,6 +67,18 @@ namespace OpenSim.OfflineIM
 
             m_ServerURI = cnf.GetString("OfflineMessageURL", string.Empty);
 
+            /// This is from BaseServiceConnector
+            string authType = Util.GetConfigVarFromSections<string>(config, "AuthType", new string[] { "Network", "Messaging" }, "None");
+
+            switch (authType)
+            {
+                case "BasicHttpAuthentication":
+                    m_Auth = new BasicHttpAuthentication(config, "Messaging");
+                    break;
+            }
+            ///
+            m_log.DebugFormat("[OfflineIM.V2.RemoteConnector]: Offline IM server at {0} with auth {1}", 
+                m_ServerURI, (m_Auth == null ? "None" : m_Auth.GetType().ToString()));
         }
 
         #region IOfflineIMService
@@ -82,8 +96,13 @@ namespace OpenSim.OfflineIM
             if (!ret.ContainsKey("RESULT"))
                 return ims;
 
-            if (ret["RESULT"].ToString() == "NULL")
+            string result = ret["RESULT"].ToString();
+            if (result == "NULL" || result.ToLower() == "false")
+            {
+                string reason = ret.ContainsKey("REASON") ? ret["REASON"].ToString() : "Unknown error";
+                m_log.DebugFormat("[OfflineIM.V2.RemoteConnector]: GetMessages for {0} failed: {1}", principalID, reason);
                 return ims;
+            }
 
             foreach (object v in ((Dictionary<string, object>)ret["RESULT"]).Values)
             {
@@ -110,11 +129,19 @@ namespace OpenSim.OfflineIM
             string result = ret["RESULT"].ToString();
             if (result == "NULL" || result.ToLower() == "false")
             {
-                reason = ret["REASON"].ToString();
+                reason = ret.ContainsKey("REASON") ? ret["REASON"].ToString() : "Unknown error";
                 return false;
             }
 
             return true;
+        }
+
+        public void DeleteMessages(UUID userID)
+        {
+            Dictionary<string, object> sendData = new Dictionary<string, object>();
+            sendData["UserID"] = userID;
+            
+            MakeRequest("DELETE", sendData);
         }
 
         #endregion
@@ -130,7 +157,8 @@ namespace OpenSim.OfflineIM
             lock (m_Lock)
                 reply = SynchronousRestFormsRequester.MakeRequest("POST",
                          m_ServerURI + "/offlineim",
-                         ServerUtils.BuildQueryString(sendData));
+                         ServerUtils.BuildQueryString(sendData),
+                         m_Auth);
 
             Dictionary<string, object> replyData = ServerUtils.ParseXmlResponse(
                     reply);

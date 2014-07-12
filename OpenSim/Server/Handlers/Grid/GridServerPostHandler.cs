@@ -40,6 +40,7 @@ using OpenSim.Server.Base;
 using OpenSim.Services.Interfaces;
 using GridRegion = OpenSim.Services.Interfaces.GridRegion;
 using OpenSim.Framework;
+using OpenSim.Framework.ServiceAuth;
 using OpenSim.Framework.Servers.HttpServer;
 using OpenMetaverse;
 
@@ -49,10 +50,14 @@ namespace OpenSim.Server.Handlers.Grid
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
+#pragma warning disable 414
+        private static string LogHeader = "[GRID HANDLER]";
+#pragma warning restore 414
+
         private IGridService m_GridService;
 
-        public GridServerPostHandler(IGridService service) :
-                base("POST", "/grid")
+        public GridServerPostHandler(IGridService service, IServiceAuth auth) :
+                base("POST", "/grid", auth)
         {
             m_GridService = service;
         }
@@ -281,8 +286,8 @@ namespace OpenSim.Server.Handlers.Grid
             else
                 m_log.WarnFormat("[GRID HANDLER]: no Y in request to get region by position");
 
+            // m_log.DebugFormat("{0} GetRegionByPosition: loc=<{1},{2}>", LogHeader, x, y);
             GridRegion rinfo = m_GridService.GetRegionByPosition(scopeID, x, y);
-            //m_log.DebugFormat("[GRID HANDLER]: neighbours for region {0}: {1}", regionID, rinfos.Count);
 
             Dictionary<string, object> result = new Dictionary<string, object>();
             if (rinfo == null)

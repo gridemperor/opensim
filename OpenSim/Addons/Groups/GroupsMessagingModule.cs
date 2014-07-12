@@ -56,8 +56,8 @@ namespace OpenSim.Groups
         private IGroupsServicesConnector m_groupData = null;
 
         // Config Options
-        private bool m_groupMessagingEnabled = false;
-        private bool m_debugEnabled = true;
+        private bool m_groupMessagingEnabled;
+        private bool m_debugEnabled;
 
         /// <summary>
         /// If enabled, module only tries to send group IMs to online users by querying cached presence information.
@@ -82,7 +82,6 @@ namespace OpenSim.Groups
 
         private Dictionary<UUID, List<string>> m_groupsAgentsDroppedFromChatSession = new Dictionary<UUID, List<string>>();
         private Dictionary<UUID, List<string>> m_groupsAgentsInvitedToChatSession = new Dictionary<UUID, List<string>>();
-
 
         #region Region Module interfaceBase Members
 
@@ -111,9 +110,17 @@ namespace OpenSim.Groups
             m_messageOnlineAgentsOnly = groupsConfig.GetBoolean("MessageOnlineUsersOnly", false);
 
             if (m_messageOnlineAgentsOnly)
+            {
                 m_usersOnlineCache = new ExpiringCache<UUID, PresenceInfo[]>();
+            }
+            else
+            {
+                m_log.Error("[Groups.Messaging]: GroupsMessagingModule V2 requires MessageOnlineUsersOnly = true");
+                m_groupMessagingEnabled = false;
+                return;
+            }
 
-            m_debugEnabled = groupsConfig.GetBoolean("DebugEnabled", true);
+            m_debugEnabled = groupsConfig.GetBoolean("MessagingDebugEnabled", m_debugEnabled);
 
             m_log.InfoFormat(
                 "[Groups.Messaging]: GroupsMessagingModule enabled with MessageOnlineOnly = {0}, DebugEnabled = {1}",
@@ -133,6 +140,14 @@ namespace OpenSim.Groups
             scene.EventManager.OnMakeChildAgent += OnMakeChildAgent;
             scene.EventManager.OnIncomingInstantMessage += OnGridInstantMessage;
             scene.EventManager.OnClientLogin += OnClientLogin;
+
+            scene.AddCommand(
+                "Debug",
+                this,
+                "debug groups messaging verbose",
+                "debug groups messaging verbose <true|false>",
+                "This setting turns on very verbose groups messaging debugging",
+                HandleDebugGroupsMessagingVerbose);
         }
 
         public void RegionLoaded(Scene scene)
@@ -172,10 +187,8 @@ namespace OpenSim.Groups
                 return;
             }
 
-
             if (m_presenceService == null)
                 m_presenceService = scene.PresenceService;
-
         }
 
         public void RemoveRegion(Scene scene)
@@ -222,6 +235,25 @@ namespace OpenSim.Groups
 
         #endregion
 
+        private void HandleDebugGroupsMessagingVerbose(object modules, string[] args)
+        {
+            if (args.Length < 5)
+            {
+                MainConsole.Instance.Output("Usage: debug groups messaging verbose <true|false>");
+                return;
+            }
+
+            bool verbose = false;
+            if (!bool.TryParse(args[4], out verbose))
+            {
+                MainConsole.Instance.Output("Usage: debug groups messaging verbose <true|false>");
+                return;
+            }
+
+            m_debugEnabled = verbose;
+
+            MainConsole.Instance.OutputFormat("{0} verbose logging set to {1}", Name, m_debugEnabled);
+        }
 
         /// <summary>
         /// Not really needed, but does confirm that the group exists.
@@ -242,11 +274,23 @@ namespace OpenSim.Groups
                 return false;
             }
         }
-        
+
         public void SendMessageToGroup(GridInstantMessage im, UUID groupID)
         {
+            SendMessageToGroup(im, groupID, UUID.Zero, null);
+        }
+        
+        public void SendMessageToGroup(
+            GridInstantMessage im, UUID groupID, UUID sendingAgentForGroupCalls, Func<GroupMembersData, bool> sendCondition)
+        {
+            int requestStartTick = Environment.TickCount;
+
             UUID fromAgentID = new UUID(im.fromAgentID);
+
+            // Unlike current XmlRpcGroups, Groups V2 can accept UUID.Zero when a perms check for the requesting agent
+            // is not necessary.
             List<GroupMembersData> groupMembers = m_groupData.GetGroupMembers(UUID.Zero.ToString(), groupID);
+
             int groupMembersCount = groupMembers.Count;
             PresenceInfo[] onlineAgents = null;
 
@@ -254,7 +298,7 @@ namespace OpenSim.Groups
             // Sending to offline members is not an option.
             string[] t1 = groupMembers.ConvertAll<string>(gmd => gmd.AgentID.ToString()).ToArray();
 
-            // We cache in order not to overwhlem the presence service on large grids with many groups.  This does
+            // We cache in order not to overwhelm the presence service on large grids with many groups.  This does
             // mean that members coming online will not see all group members until after m_usersOnlineCacheExpirySeconds has elapsed.
             // (assuming this is the same across all grid simulators).
             if (!m_usersOnlineCache.TryGetValue(groupID, out onlineAgents))
@@ -272,8 +316,6 @@ namespace OpenSim.Groups
 //                    m_log.DebugFormat(
 //                        "[Groups.Messaging]: SendMessageToGroup called for group {0} with {1} visible members, {2} online",
 //                        groupID, groupMembersCount, groupMembers.Count());
-
-            int requestStartTick = Environment.TickCount;
 
             im.imSessionID = groupID.Guid;
             im.fromGroup = true;
@@ -299,12 +341,27 @@ namespace OpenSim.Groups
 
                 if (clientsAlreadySent.Contains(member.AgentID))
                     continue;
+
                 clientsAlreadySent.Add(member.AgentID);
 
-                if (hasAgentDroppedGroupChatSession(member.AgentID.ToString(), groupID))
+                if (sendCondition != null)
+                {
+                    if (!sendCondition(member))
+                    {
+                        if (m_debugEnabled) 
+                            m_log.DebugFormat(
+                                "[Groups.Messaging]: Not sending to {0} as they do not fulfill send condition", 
+                                 member.AgentID);
+
+                        continue;
+                    }
+                }
+                else if (hasAgentDroppedGroupChatSession(member.AgentID.ToString(), groupID))
                 {
                     // Don't deliver messages to people who have dropped this session
-                    if (m_debugEnabled) m_log.DebugFormat("[Groups.Messaging]: {0} has dropped session, not delivering to them", member.AgentID);
+                    if (m_debugEnabled) 
+                        m_log.DebugFormat("[Groups.Messaging]: {0} has dropped session, not delivering to them", member.AgentID);
+
                     continue;
                 }
 

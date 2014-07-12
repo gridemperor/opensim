@@ -38,6 +38,7 @@ using System.Xml.Serialization;
 using OpenSim.Server.Base;
 using OpenSim.Services.Interfaces;
 using OpenSim.Framework;
+using OpenSim.Framework.ServiceAuth;
 using OpenSim.Framework.Servers.HttpServer;
 
 namespace OpenSim.Server.Handlers.Asset
@@ -54,35 +55,44 @@ namespace OpenSim.Server.Handlers.Asset
             m_AssetService = service;
         }
 
+        public AssetServerPostHandler(IAssetService service, IServiceAuth auth) :
+            base("POST", "/assets", auth)
+        {
+            m_AssetService = service;
+        }
+
         protected override byte[] ProcessRequest(string path, Stream request,
                 IOSHttpRequest httpRequest, IOSHttpResponse httpResponse)
         {
             AssetBase asset;
-            XmlSerializer xs = new XmlSerializer(typeof (AssetBase));
+            XmlSerializer xs = new XmlSerializer(typeof(AssetBase));
 
             try
             {
                 asset = (AssetBase)xs.Deserialize(request);
             }
-            catch (XmlException)
+            catch (Exception)
             {
                 httpResponse.StatusCode = (int)HttpStatusCode.BadRequest;
                 return null;
             }
 
             string[] p = SplitParams(path);
-            if (p.Length > 1)
+            if (p.Length > 0)
             {
-                bool result = m_AssetService.UpdateContent(p[1], asset.Data);
+                string id = p[0];
+                bool result = m_AssetService.UpdateContent(id, asset.Data);
 
                 xs = new XmlSerializer(typeof(bool));
                 return ServerUtils.SerializeResult(xs, result);
             }
+            else
+            {
+                string id = m_AssetService.Store(asset);
 
-            string id = m_AssetService.Store(asset);
-
-            xs = new XmlSerializer(typeof(string));
-            return ServerUtils.SerializeResult(xs, id);
+                xs = new XmlSerializer(typeof(string));
+                return ServerUtils.SerializeResult(xs, id);
+            }
         }
     }
 }

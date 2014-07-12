@@ -122,10 +122,18 @@ namespace OpenSim.Services.InventoryService
             if (!Array.Exists(sysFolders, delegate (XInventoryFolder f) { if (f.type == (int)AssetType.Bodypart) return true; return false; }))
                 CreateFolder(principalID, rootFolder.ID, (int)AssetType.Bodypart, "Body Parts");
             if (!Array.Exists(sysFolders, delegate (XInventoryFolder f) { if (f.type == (int)AssetType.CallingCard) return true; return false; }))
-                CreateFolder(principalID, rootFolder.ID, (int)AssetType.CallingCard, "Calling Cards");
+            {
+                XInventoryFolder folder = CreateFolder(principalID, rootFolder.ID, (int)AssetType.CallingCard, "Calling Cards");
+                folder = CreateFolder(principalID, folder.folderID, (int)AssetType.CallingCard, "Friends");
+                CreateFolder(principalID, folder.folderID, (int)AssetType.CallingCard, "All");
+            }
             if (!Array.Exists(sysFolders, delegate (XInventoryFolder f) { if (f.type == (int)AssetType.Clothing) return true; return false; }))
                 CreateFolder(principalID, rootFolder.ID, (int)AssetType.Clothing, "Clothing");
-            if (!Array.Exists(sysFolders, delegate (XInventoryFolder f) { if (f.type == (int)AssetType.Gesture) return true; return false; }))
+            if (!Array.Exists(sysFolders, delegate (XInventoryFolder f) { if (f.type == (int)AssetType.CurrentOutfitFolder) return true; return false; }))
+                CreateFolder(principalID, rootFolder.ID, (int)AssetType.CurrentOutfitFolder, "Current Outfit");
+            if (!Array.Exists(sysFolders, delegate(XInventoryFolder f) { if (f.type == (int)AssetType.FavoriteFolder) return true; return false; }))
+                CreateFolder(principalID, rootFolder.ID, (int)AssetType.FavoriteFolder, "Favorites");
+            if (!Array.Exists(sysFolders, delegate(XInventoryFolder f) { if (f.type == (int)AssetType.Gesture) return true; return false; }))
                 CreateFolder(principalID, rootFolder.ID, (int)AssetType.Gesture, "Gestures");
             if (!Array.Exists(sysFolders, delegate (XInventoryFolder f) { if (f.type == (int)AssetType.Landmark) return true; return false; }))
                 CreateFolder(principalID, rootFolder.ID, (int)AssetType.Landmark, "Landmarks");
@@ -615,34 +623,6 @@ namespace OpenSim.Services.InventoryService
             return m_Database.GetAssetPermissions(principalID, assetID);
         }
 
-        public virtual InventoryCollection GetUserInventory(UUID userID)
-        {
-            InventoryCollection userInventory = new InventoryCollection();
-            userInventory.UserID = userID;
-            userInventory.Folders = new List<InventoryFolderBase>();
-            userInventory.Items = new List<InventoryItemBase>();
-
-            List<InventoryFolderBase> skel = GetInventorySkeleton(userID);
-            if (skel != null)
-            {
-                foreach (InventoryFolderBase f in skel)
-                {
-                    InventoryCollection c = GetFolderContent(userID, f.ID);
-                    if (c != null && c.Items != null && c.Items.Count > 0)
-                        userInventory.Items.AddRange(c.Items);
-                    if (c != null && c.Folders != null && c.Folders.Count > 0)
-                        userInventory.Folders.AddRange(c.Folders);
-                }
-            }
-            m_log.DebugFormat("[XINVENTORY SERVICE]: GetUserInventory for user {0} returning {1} folders and {2} items",
-                userID, userInventory.Folders.Count, userInventory.Items.Count);
-            return userInventory;
-        }
-
-        public void GetUserInventory(UUID userID, InventoryReceiptCallback callback)
-        {
-        }
-
         // Unused.
         //
         public bool HasInventoryForUser(UUID userID)
@@ -659,8 +639,8 @@ namespace OpenSim.Services.InventoryService
             newFolder.ParentID = folder.parentFolderID;
             newFolder.Type = (short)folder.type;
             // Viewer can't understand anything that's not in it's LLFolderType enum
-            if (newFolder.Type == 100)
-                newFolder.Type = -1;
+            if (newFolder.Type == InventoryItemBase.SUITCASE_FOLDER_TYPE)
+                newFolder.Type = InventoryItemBase.SUITCASE_FOLDER_FAKE_TYPE;
             newFolder.Version = (ushort)folder.version;
             newFolder.Name = folder.folderName;
             newFolder.Owner = folder.agentID;

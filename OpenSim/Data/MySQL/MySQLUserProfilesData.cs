@@ -634,8 +634,6 @@ namespace OpenSim.Data.MySQL
                         {
                             if(reader.HasRows)
                             {
-                                m_log.DebugFormat("[PROFILES_DATA]" +
-                                                  ": Getting data for {0}.", props.UserId);
                                 reader.Read();
                                 props.WebUrl = (string)reader["profileURL"];
                                 UUID.TryParse((string)reader["profileImage"], out props.ImageId);
@@ -651,9 +649,6 @@ namespace OpenSim.Data.MySQL
                             }
                             else
                             {
-                                m_log.DebugFormat("[PROFILES_DATA]" +
-                                                 ": No data for {0}", props.UserId);
-                               
                                 props.WebUrl = string.Empty;
                                 props.ImageId = UUID.Zero;
                                 props.AboutText = string.Empty;
@@ -974,8 +969,8 @@ namespace OpenSim.Data.MySQL
                     dbcon.Open();
                     using (MySqlCommand cmd = new MySqlCommand(query, dbcon))
                     {
-                        cmd.Parameters.AddWithValue("?ImViaEmail", pref.IMViaEmail);
-                        cmd.Parameters.AddWithValue("?Visible", pref.Visible);
+                        cmd.Parameters.AddWithValue("?ImViaEmail", pref.IMViaEmail.ToString().ToLower());
+                        cmd.Parameters.AddWithValue("?Visible", pref.Visible.ToString().ToLower());
                         cmd.Parameters.AddWithValue("?uuid", pref.UserId.ToString());
 
                         cmd.ExecuteNonQuery();

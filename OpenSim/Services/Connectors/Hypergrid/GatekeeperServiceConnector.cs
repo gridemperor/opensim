@@ -202,10 +202,16 @@ namespace OpenSim.Services.Connectors.Hypergrid
             return mapTile;
         }
 
-        public GridRegion GetHyperlinkRegion(GridRegion gatekeeper, UUID regionID)
+        public GridRegion GetHyperlinkRegion(GridRegion gatekeeper, UUID regionID, UUID agentID, string agentHomeURI, out string message)
         {
             Hashtable hash = new Hashtable();
             hash["region_uuid"] = regionID.ToString();
+            if (agentID != UUID.Zero)
+            {
+                hash["agent_id"] = agentID.ToString();
+                if (agentHomeURI != null)
+                    hash["agent_home_uri"] = agentHomeURI;
+            }
 
             IList paramList = new ArrayList();
             paramList.Add(hash);
@@ -219,12 +225,14 @@ namespace OpenSim.Services.Connectors.Hypergrid
             }
             catch (Exception e)
             {
+                message = "Error contacting grid.";
                 m_log.Debug("[GATEKEEPER SERVICE CONNECTOR]: Exception " + e.Message);
                 return null;
             }
 
             if (response.IsFault)
             {
+                message = "Error contacting grid.";
                 m_log.ErrorFormat("[GATEKEEPER SERVICE CONNECTOR]: remote call returned an error: {0}", response.FaultString);
                 return null;
             }
@@ -236,6 +244,14 @@ namespace OpenSim.Services.Connectors.Hypergrid
             {
                 bool success = false;
                 Boolean.TryParse((string)hash["result"], out success);
+
+                if (hash["message"] != null)
+                    message = (string)hash["message"];
+                else if (success)
+                    message = null;
+                else
+                    message = "The teleport destination could not be found.";   // probably the dest grid is old and doesn't send 'message', but the most common problem is that the region is unavailable
+
                 if (success)
                 {
                     GridRegion region = new GridRegion();
@@ -253,6 +269,18 @@ namespace OpenSim.Services.Connectors.Hypergrid
                     {
                         Int32.TryParse((string)hash["y"], out n);
                         region.RegionLocY = n;
+                        //m_log.Debug(">> HERE, y: " + region.RegionLocY);
+                    }
+                    if (hash["size_x"] != null)
+                    {
+                        Int32.TryParse((string)hash["size_x"], out n);
+                        region.RegionSizeX = n;
+                        //m_log.Debug(">> HERE, x: " + region.RegionLocX);
+                    }
+                    if (hash["size_y"] != null)
+                    {
+                        Int32.TryParse((string)hash["size_y"], out n);
+                        region.RegionSizeY = n;
                         //m_log.Debug(">> HERE, y: " + region.RegionLocY);
                     }
                     if (hash["region_name"] != null)
@@ -293,6 +321,7 @@ namespace OpenSim.Services.Connectors.Hypergrid
             }
             catch (Exception e)
             {
+                message = "Error parsing response from grid.";
                 m_log.Error("[GATEKEEPER SERVICE CONNECTOR]: Got exception while parsing hyperlink response " + e.StackTrace);
                 return null;
             }

@@ -62,11 +62,22 @@ namespace OpenSim.Tests.Common.Mock
         public event Action<RegionInfo, Vector3, Vector3> OnReceivedMoveAgentIntoRegion;
         public event Action<ulong, IPEndPoint> OnTestClientInformClientOfNeighbour;
         public event TestClientOnSendRegionTeleportDelegate OnTestClientSendRegionTeleport;
+
+        public event Action<ISceneEntity, PrimUpdateFlags> OnReceivedEntityUpdate;
+
+        public event OnReceivedChatMessageDelegate OnReceivedChatMessage;
         public event Action<GridInstantMessage> OnReceivedInstantMessage;
+
+        public event Action<UUID> OnReceivedSendRebakeAvatarTextures;
 
         public delegate void TestClientOnSendRegionTeleportDelegate(
             ulong regionHandle, byte simAccess, IPEndPoint regionExternalEndPoint,
             uint locationID, uint flags, string capsURL);
+
+        public delegate void OnReceivedChatMessageDelegate(
+            string message, byte type, Vector3 fromPos, string fromName,
+            UUID fromAgentID, UUID ownerID, byte source, byte audible);
+
 
 // disable warning: public events, part of the public API
 #pragma warning disable 67
@@ -465,6 +476,34 @@ namespace OpenSim.Tests.Common.Mock
         }
 
         /// <summary>
+        /// Trigger chat coming from this connection.
+        /// </summary>
+        /// <param name="channel"></param>
+        /// <param name="type"></param>
+        /// <param name="message"></param>
+        public bool Chat(int channel, ChatTypeEnum type, string message)
+        {
+            ChatMessage handlerChatFromClient = OnChatFromClient;
+
+            if (handlerChatFromClient != null)
+            {
+                OSChatMessage args = new OSChatMessage();
+                args.Channel = channel;
+                args.From = Name;
+                args.Message = message;
+                args.Type = type;
+
+                args.Scene = Scene;
+                args.Sender = this;
+                args.SenderUUID = AgentId;
+
+                handlerChatFromClient(this, args);
+            }
+
+            return true;
+        }
+
+        /// <summary>
         /// Attempt a teleport to the given region.
         /// </summary>
         /// <param name="regionHandle"></param>
@@ -548,6 +587,9 @@ namespace OpenSim.Tests.Common.Mock
             string message, byte type, Vector3 fromPos, string fromName,
             UUID fromAgentID, UUID ownerID, byte source, byte audible)
         {
+//            Console.WriteLine("mmm {0} {1} {2}", message, Name, AgentId);
+            if (OnReceivedChatMessage != null)
+                OnReceivedChatMessage(message, type, fromPos, fromName, fromAgentID, ownerID, source, audible);
         }
 
         public void SendInstantMessage(GridInstantMessage im)
@@ -684,6 +726,8 @@ namespace OpenSim.Tests.Common.Mock
 
         public void SendEntityUpdate(ISceneEntity entity, PrimUpdateFlags updateFlags)
         {
+            if (OnReceivedEntityUpdate != null)
+                OnReceivedEntityUpdate(entity, updateFlags);
         }
 
         public void ReprioritizeUpdates()
@@ -787,11 +831,6 @@ namespace OpenSim.Tests.Common.Mock
             if (OnRegionHandShakeReply != null)
             {
                 OnRegionHandShakeReply(this);
-            }
-
-            if (OnCompleteMovementToRegion != null)
-            {
-                OnCompleteMovementToRegion(this, true);
             }
         }
         
@@ -1232,6 +1271,8 @@ namespace OpenSim.Tests.Common.Mock
 
         public void SendRebakeAvatarTextures(UUID textureID)
         {
+            if (OnReceivedSendRebakeAvatarTextures != null)
+                OnReceivedSendRebakeAvatarTextures(textureID);
         }
         
         public void SendAvatarInterestsReply(UUID avatarID, uint wantMask, string wantText, uint skillsMask, string skillsText, string languages)

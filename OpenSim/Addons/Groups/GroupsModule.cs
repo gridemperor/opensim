@@ -45,9 +45,6 @@ namespace OpenSim.Groups
     [Extension(Path = "/OpenSim/RegionModules", NodeName = "RegionModule", Id = "GroupsModule")]
     public class GroupsModule : ISharedRegionModule, IGroupsModule
     {
-        /// <summary>
-        /// </summary>
-
         private static readonly ILog m_log =
             LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
@@ -104,7 +101,7 @@ namespace OpenSim.Groups
             {
                 scene.RegisterModuleInterface<IGroupsModule>(this);
                 scene.AddCommand(
-                    "debug",
+                    "Debug",
                     this,
                     "debug groups verbose",
                     "debug groups verbose <true|false>",
@@ -466,6 +463,7 @@ namespace OpenSim.Groups
                             OnNewGroupNotice(GroupID, NoticeID);
                         }
 
+                       
                         // Send notice out to everyone that wants notices
                         foreach (GroupMembersData member in m_groupData.GetGroupMembers(GetRequestingAgentIDStr(remoteClient), GroupID))
                         {
@@ -498,12 +496,13 @@ namespace OpenSim.Groups
                     Util.ParseUniversalUserIdentifier(notice.noticeData.AttachmentOwnerID, out giver, out tmp, out tmp, out tmp, out tmp);
 
                     m_log.DebugFormat("[Groups]: Giving inventory from {0} to {1}", giver, remoteClient.AgentId);
+                    string message;
                     InventoryItemBase itemCopy = ((Scene)(remoteClient.Scene)).GiveInventoryItem(remoteClient.AgentId, 
-                        giver, notice.noticeData.AttachmentItemID);
+                        giver, notice.noticeData.AttachmentItemID, out message);
 
                     if (itemCopy == null)
                     {
-                        remoteClient.SendAgentAlertMessage("Can't find item to give. Nothing given.", false);
+                        remoteClient.SendAgentAlertMessage(message, false);
                         return;
                     }
 

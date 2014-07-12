@@ -77,9 +77,11 @@ namespace OpenSim.Region.OptionalModules.Avatar.XmlRpcGroups
 
         private List<Scene> m_sceneList = new List<Scene>();
 
-        private IMessageTransferModule m_msgTransferModule = null;
+        private IMessageTransferModule m_msgTransferModule;
+
+        private IGroupsMessagingModule m_groupsMessagingModule;
         
-        private IGroupsServicesConnector m_groupData = null;
+        private IGroupsServicesConnector m_groupData;
 
         // Configuration settings
         private bool m_groupsEnabled = false;
@@ -185,8 +187,17 @@ namespace OpenSim.Region.OptionalModules.Avatar.XmlRpcGroups
                 if (m_msgTransferModule == null)
                 {
                     m_groupsEnabled = false;
-                    m_log.Warn("[GROUPS]: Could not get MessageTransferModule");
+                    m_log.Warn("[GROUPS]: Could not get IMessageTransferModule");
                 }
+            }
+
+            if (m_groupsMessagingModule == null)
+            {
+                m_groupsMessagingModule = scene.RequestModuleInterface<IGroupsMessagingModule>();
+
+                // No message transfer module, no notices, group invites, rejects, ejects, etc
+                if (m_groupsMessagingModule == null)
+                    m_log.Warn("[GROUPS]: Could not get IGroupsMessagingModule");
             }
 
             lock (m_sceneList)
@@ -346,7 +357,10 @@ namespace OpenSim.Region.OptionalModules.Avatar.XmlRpcGroups
 
         private void OnInstantMessage(IClientAPI remoteClient, GridInstantMessage im)
         {
-            if (m_debugEnabled) m_log.DebugFormat("[GROUPS]: {0} called", System.Reflection.MethodBase.GetCurrentMethod().Name);
+            if (m_debugEnabled) 
+                m_log.DebugFormat(
+                    "[GROUPS]: {0} called for {1}, message type {2}", 
+                    System.Reflection.MethodBase.GetCurrentMethod().Name, remoteClient.Name, (InstantMessageDialog)im.dialog);
 
             // Group invitations
             if ((im.dialog == (byte)InstantMessageDialog.GroupInvitationAccept) || (im.dialog == (byte)InstantMessageDialog.GroupInvitationDecline))
@@ -497,31 +511,38 @@ namespace OpenSim.Region.OptionalModules.Avatar.XmlRpcGroups
                         OnNewGroupNotice(GroupID, NoticeID);
                     }
 
-                    // Send notice out to everyone that wants notices
-                    foreach (GroupMembersData member in m_groupData.GetGroupMembers(GetRequestingAgentID(remoteClient), GroupID))
+                    if (m_debugEnabled)
                     {
-                         if (m_debugEnabled)
+                        foreach (GroupMembersData member in m_groupData.GetGroupMembers(GetRequestingAgentID(remoteClient), GroupID))
                         {
-                            UserAccount targetUser = m_sceneList[0].UserAccountService.GetUserAccount(remoteClient.Scene.RegionInfo.ScopeID, member.AgentID);
-                            if (targetUser != null)
+                            if (m_debugEnabled)
                             {
-                                m_log.DebugFormat("[GROUPS]: Prepping group notice {0} for agent: {1} who Accepts Notices ({2})", NoticeID, targetUser.FirstName + " " + targetUser.LastName, member.AcceptNotices);
-                            }
-                            else
-                            {
-                                m_log.DebugFormat("[GROUPS]: Prepping group notice {0} for agent: {1} who Accepts Notices ({2})", NoticeID, member.AgentID, member.AcceptNotices);
-                            }
-                        }
+                                UserAccount targetUser
+                                    = m_sceneList[0].UserAccountService.GetUserAccount(
+                                        remoteClient.Scene.RegionInfo.ScopeID, member.AgentID);
 
-                       if (member.AcceptNotices)
-                        {
-                            // Build notice IM
-                            GridInstantMessage msg = CreateGroupNoticeIM(UUID.Zero, NoticeID, (byte)OpenMetaverse.InstantMessageDialog.GroupNotice);
-
-                            msg.toAgentID = member.AgentID.Guid;
-                            OutgoingInstantMessage(msg, member.AgentID);
+                                if (targetUser != null)
+                                {
+                                    m_log.DebugFormat(
+                                        "[GROUPS]: Prepping group notice {0} for agent: {1} who Accepts Notices ({2})", 
+                                        NoticeID, targetUser.FirstName + " " + targetUser.LastName, member.AcceptNotices);
+                                }
+                                else
+                                {
+                                    m_log.DebugFormat(
+                                        "[GROUPS]: Prepping group notice {0} for agent: {1} who Accepts Notices ({2})", 
+                                        NoticeID, member.AgentID, member.AcceptNotices);
+                                }
+                            }
                         }
                     }
+
+                    GridInstantMessage msg 
+                        = CreateGroupNoticeIM(UUID.Zero, NoticeID, (byte)OpenMetaverse.InstantMessageDialog.GroupNotice);
+
+                    if (m_groupsMessagingModule != null)
+                        m_groupsMessagingModule.SendMessageToGroup(
+                            msg, GroupID, remoteClient.AgentId, gmd => gmd.AcceptNotices);
                 }
             }
 
@@ -533,6 +554,9 @@ namespace OpenSim.Region.OptionalModules.Avatar.XmlRpcGroups
 
                 UUID noticeID = new UUID(im.imSessionID);
 
+                if (m_debugEnabled) 
+                    m_log.DebugFormat("[GROUPS]: Requesting notice {0} for {1}", noticeID, remoteClient.AgentId);
+
                 GroupNoticeInfo notice = m_groupData.GetGroupNotice(GetRequestingAgentID(remoteClient), noticeID);
                 if (notice != null)
                 {
@@ -542,16 +566,24 @@ namespace OpenSim.Region.OptionalModules.Avatar.XmlRpcGroups
                     if (m_debugEnabled)
                         m_log.DebugFormat("[Groups]: Giving inventory from {0} to {1}", giver, remoteClient.AgentId);
 
+                    string message;
                     InventoryItemBase itemCopy = ((Scene)(remoteClient.Scene)).GiveInventoryItem(remoteClient.AgentId,
-                        giver, attachmentUUID);
+                        giver, attachmentUUID, out message);
 
                     if (itemCopy == null)
                     {
-                        remoteClient.SendAgentAlertMessage("Can't find item to give. Nothing given.", false);
+                        remoteClient.SendAgentAlertMessage(message, false);
                         return;
                     }
 
                     remoteClient.SendInventoryItemCreateUpdate(itemCopy, 0);
+                }
+                else
+                {
+                    if (m_debugEnabled) 
+                        m_log.DebugFormat(
+                            "[GROUPS]: Could not find notice {0} for {1} on GroupNoticeInventoryAccepted.", 
+                            noticeID, remoteClient.AgentId);                   
                 }
             }
 

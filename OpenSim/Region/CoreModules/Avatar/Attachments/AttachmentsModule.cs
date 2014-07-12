@@ -245,8 +245,9 @@ namespace OpenSim.Region.CoreModules.Avatar.Attachments
                         string state = sog.GetStateSnapshot();
                         ad.AttachmentObjectStates.Add(state);
                         sp.InTransitScriptStates.Add(state);
-                        // Let's remove the scripts of the original object here
-                        sog.RemoveScriptInstances(true);
+
+                        // Scripts of the originals will be removed when the Agent is successfully removed.
+                        // sog.RemoveScriptInstances(true);
                     }
                 }
             }
@@ -773,15 +774,10 @@ namespace OpenSim.Region.CoreModules.Avatar.Attachments
                         (sbyte)AssetType.Object,
                         Utils.StringToBytes(sceneObjectXml),
                         sp.UUID);
-                    m_scene.AssetService.Store(asset);
 
-                    item.AssetID = asset.FullID;
-                    item.Description = asset.Description;
-                    item.Name = asset.Name;
-                    item.AssetType = asset.Type;
-                    item.InvType = (int)InventoryType.Object;
+                    IInventoryAccessModule invAccess = m_scene.RequestModuleInterface<IInventoryAccessModule>();
 
-                    m_scene.InventoryService.UpdateItem(item);
+                    invAccess.UpdateInventoryItemAsset(sp.UUID, item, asset);
 
                     // If the name of the object has been changed whilst attached then we want to update the inventory
                     // item in the viewer.
@@ -989,6 +985,13 @@ namespace OpenSim.Region.CoreModules.Avatar.Attachments
                     itemID, sp.Name, attachmentPt);
 
                 return null;
+            }
+            else if (itemID == UUID.Zero)
+            {
+                // We need to have a FromItemID for multiple attachments on a single attach point to appear.  This is 
+                // true on Singularity 1.8.5 and quite possibly other viewers as well.  As NPCs don't have an inventory
+                // we will satisfy this requirement by inserting a random UUID.
+                objatt.FromItemID = UUID.Random();
             }
 
             if (DebugLevel > 0)

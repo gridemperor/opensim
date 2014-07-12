@@ -140,8 +140,30 @@ namespace OpenSim.Region.OptionalModules.World.NPC
                 Vector3 position, UUID owner, bool senseAsAgent, Scene scene,
                 AvatarAppearance appearance)
         {
-            NPCAvatar npcAvatar = new NPCAvatar(firstname, lastname, position,
-                    owner, senseAsAgent, scene);
+            return CreateNPC(firstname, lastname, position, UUID.Zero, owner, senseAsAgent, scene, appearance);
+        }
+
+        public UUID CreateNPC(string firstname, string lastname,
+                Vector3 position, UUID agentID, UUID owner, bool senseAsAgent, Scene scene,
+                AvatarAppearance appearance)
+        {
+            NPCAvatar npcAvatar = null;
+
+            try
+            {
+                if (agentID == UUID.Zero)
+                    npcAvatar = new NPCAvatar(firstname, lastname, position,
+                            owner, senseAsAgent, scene);
+                else
+                    npcAvatar = new NPCAvatar(firstname, lastname, agentID, position,
+                        owner, senseAsAgent, scene);
+            }
+            catch (Exception e)
+            {
+                m_log.Info("[NPC MODULE]: exception creating NPC avatar: " + e.ToString());
+                return UUID.Zero;
+            }
+
             npcAvatar.CircuitCode = (uint)Util.RandomClass.Next(0,
                     int.MaxValue);
 
@@ -156,8 +178,7 @@ namespace OpenSim.Region.OptionalModules.World.NPC
             acd.lastname = lastname;
             acd.ServiceURLs = new Dictionary<string, object>();
 
-            AvatarAppearance npcAppearance = new AvatarAppearance(appearance,
-                    true);
+            AvatarAppearance npcAppearance = new AvatarAppearance(appearance, true);
             acd.Appearance = npcAppearance;
 
             /*

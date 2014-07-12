@@ -88,7 +88,7 @@ public sealed class BSScene : PhysicsScene, IPhysicsParameters
     public BSConstraintCollection Constraints { get; private set; }
 
     // Simulation parameters
-    internal float m_physicsStepTime;   // if running independently, the interval simulated by default
+    //internal float m_physicsStepTime;   // if running independently, the interval simulated by default
 
     internal int m_maxSubSteps;
     internal float m_fixedTimeStep;
@@ -208,7 +208,16 @@ public sealed class BSScene : PhysicsScene, IPhysicsParameters
         Name = EngineType + "/" + RegionName;
     }
 
+    // Old version of initialization that assumes legacy sized regions (256x256)
     public override void Initialise(IMesher meshmerizer, IConfigSource config)
+    {
+        m_log.ErrorFormat("{0} WARNING WARNING WARNING! BulletSim initialized without region extent specification. Terrain will be messed up.");
+        Vector3 regionExtent = new Vector3( Constants.RegionSize, Constants.RegionSize, Constants.RegionSize);
+        Initialise(meshmerizer, config, regionExtent);
+        
+    }
+
+    public override void Initialise(IMesher meshmerizer, IConfigSource config, Vector3 regionExtent)
     {
         mesher = meshmerizer;
         _taintOperations = new List<TaintCallbackEntry>();
@@ -225,6 +234,14 @@ public sealed class BSScene : PhysicsScene, IPhysicsParameters
 
         // Set default values for physics parameters plus any overrides from the ini file
         GetInitialParameterValues(config);
+
+        // Force some parameters to values depending on other configurations
+        // Only use heightmap terrain implementation if terrain larger than legacy size
+        if ((uint)regionExtent.X > Constants.RegionSize || (uint)regionExtent.Y > Constants.RegionSize)
+        {
+            m_log.WarnFormat("{0} Forcing terrain implementation to heightmap for large region", LogHeader);
+            BSParam.TerrainImplementation = (float)BSTerrainPhys.TerrainImplementation.Heightmap;
+        }
 
         // Get the connection to the physics engine (could be native or one of many DLLs)
         PE = SelectUnderlyingBulletEngine(BulletEngineName);
@@ -250,13 +267,13 @@ public sealed class BSScene : PhysicsScene, IPhysicsParameters
         //    a child in a mega-region.
         // Bullet actually doesn't care about the extents of the simulated
         //    area. It tracks active objects no matter where they are.
-        Vector3 worldExtent = new Vector3(Constants.RegionSize, Constants.RegionSize, Constants.RegionHeight);
+        Vector3 worldExtent = regionExtent;
 
         World = PE.Initialize(worldExtent, Params, m_maxCollisionsPerFrame, ref m_collisionArray, m_maxUpdatesPerFrame, ref m_updateArray);
 
         Constraints = new BSConstraintCollection(World);
 
-        TerrainManager = new BSTerrainManager(this);
+        TerrainManager = new BSTerrainManager(this, worldExtent);
         TerrainManager.CreateInitialGroundPlaneAndTerrain();
 
         // Put some informational messages into the log file.
@@ -622,15 +639,18 @@ public sealed class BSScene : PhysicsScene, IPhysicsParameters
         {
             if (collidersCount > 0)
             {
-                for (int ii = 0; ii < collidersCount; ii++)
+                lock (PhysObjects)
                 {
-                    uint cA = m_collisionArray[ii].aID;
-                    uint cB = m_collisionArray[ii].bID;
-                    Vector3 point = m_collisionArray[ii].point;
-                    Vector3 normal = m_collisionArray[ii].normal;
-                    float penetration = m_collisionArray[ii].penetration;
-                    SendCollision(cA, cB, point, normal, penetration);
-                    SendCollision(cB, cA, point, -normal, penetration);
+                    for (int ii = 0; ii < collidersCount; ii++)
+                    {
+                        uint cA = m_collisionArray[ii].aID;
+                        uint cB = m_collisionArray[ii].bID;
+                        Vector3 point = m_collisionArray[ii].point;
+                        Vector3 normal = m_collisionArray[ii].normal;
+                        float penetration = m_collisionArray[ii].penetration;
+                        SendCollision(cA, cB, point, normal, penetration);
+                        SendCollision(cB, cA, point, -normal, penetration);
+                    }
                 }
             }
         }
@@ -641,14 +661,17 @@ public sealed class BSScene : PhysicsScene, IPhysicsParameters
         {
             if (updatedEntityCount > 0)
             {
-                for (int ii = 0; ii < updatedEntityCount; ii++)
+                lock (PhysObjects)
                 {
-                    EntityProperties entprop = m_updateArray[ii];
-                    BSPhysObject pobj;
-                    if (PhysObjects.TryGetValue(entprop.ID, out pobj))
+                    for (int ii = 0; ii < updatedEntityCount; ii++)
                     {
-                        if (pobj.IsInitialized)
-                            pobj.UpdateProperties(entprop);
+                        EntityProperties entprop = m_updateArray[ii];
+                        BSPhysObject pobj;
+                        if (PhysObjects.TryGetValue(entprop.ID, out pobj))
+                        {
+                            if (pobj.IsInitialized)
+                                pobj.UpdateProperties(entprop);
+                        }
                     }
                 }
             }
@@ -682,7 +705,10 @@ public sealed class BSScene : PhysicsScene, IPhysicsParameters
     //    this is is under UpdateLock.
     public void PostUpdate(BSPhysObject updatee)
     {
-        ObjectsWithUpdates.Add(updatee);
+        lock (UpdateLock)
+        {
+            ObjectsWithUpdates.Add(updatee);
+        }
     }
 
     // The simulator thinks it is physics time so return all the collisions and position
@@ -780,7 +806,10 @@ public sealed class BSScene : PhysicsScene, IPhysicsParameters
             if (collider.Collide(collidingWith, collidee, collidePoint, collideNormal, penetration))
             {
                 // If a collision was 'good', remember to send it to the simulator
-                ObjectsWithCollisions.Add(collider);
+                lock (CollisionLock)
+                {
+                    ObjectsWithCollisions.Add(collider);
+                }
             }
         }
 

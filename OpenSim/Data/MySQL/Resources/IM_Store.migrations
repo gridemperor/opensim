@@ -1,4 +1,4 @@
-﻿:VERSION 1         # -------------------------- 
+:VERSION 1         # -------------------------- 
 
 BEGIN;
 
@@ -20,5 +20,23 @@ BEGIN;
 INSERT INTO `im_offline` SELECT * from `diva_im_offline`;
 DROP TABLE `diva_im_offline`;
 DELETE FROM `migrations` WHERE name='diva_im_Store';
+
+COMMIT;
+
+:VERSION 3         # -------------------------- 
+
+BEGIN;
+
+ALTER TABLE `im_offline`
+  ADD `FromID` char(36) NOT NULL default '' AFTER `PrincipalID`,
+  ADD KEY `FromID` (`FromID`);
+
+COMMIT;
+
+:VERSION 4         # -------------------------- 
+
+BEGIN;
+
+ALTER TABLE im_offline CONVERT TO CHARACTER SET utf8;
 
 COMMIT;

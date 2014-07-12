@@ -516,7 +516,7 @@ namespace OpenSim.Region.OptionalModules.Agent.InternetRelayClientView.Server
 
         public Vector3 StartPos
         {
-            get { return new Vector3(((int)Constants.RegionSize * 0.5f), ((int)Constants.RegionSize * 0.5f), 50); }
+            get { return new Vector3(m_scene.RegionInfo.RegionSizeX * 0.5f, m_scene.RegionInfo.RegionSizeY * 0.5f, 50f); }
             set { }
         }
 
@@ -1426,9 +1426,11 @@ namespace OpenSim.Region.OptionalModules.Agent.InternetRelayClientView.Server
             return new byte[0];
         }
 
+#pragma warning disable 0067
         public event ViewerEffectEventHandler OnViewerEffect;
         public event Action<IClientAPI> OnLogout;
         public event Action<IClientAPI> OnConnectionClosed;
+#pragma warning restore 0067
 
         public void SendBlueBoxMessage(UUID FromAvatarID, string FromAvatarName, string Message)
         {

@@ -68,10 +68,6 @@ namespace OpenSim.Services.GridService
         protected string m_ThisGatekeeper = string.Empty;
         protected Uri m_ThisGatekeeperURI = null;
 
-        // Hyperlink regions are hyperlinks on the map
-        public readonly Dictionary<UUID, GridRegion> m_HyperlinkRegions = new Dictionary<UUID, GridRegion>();
-        protected Dictionary<UUID, ulong> m_HyperlinkHandles = new Dictionary<UUID, ulong>();
-
         protected GridRegion m_DefaultRegion;
         protected GridRegion DefaultRegion
         {
@@ -160,18 +156,18 @@ namespace OpenSim.Services.GridService
 
             if (MainConsole.Instance != null)
             {
-                MainConsole.Instance.Commands.AddCommand("hypergrid", false, "link-region",
+                MainConsole.Instance.Commands.AddCommand("Hypergrid", false, "link-region",
                     "link-region <Xloc> <Yloc> <ServerURI> [<RemoteRegionName>]",
                     "Link a HyperGrid Region. Examples for <ServerURI>: http://grid.net:8002/ or http://example.org/path/foo.php", RunCommand);
-                MainConsole.Instance.Commands.AddCommand("hypergrid", false, "link-region",
+                MainConsole.Instance.Commands.AddCommand("Hypergrid", false, "link-region",
                     "link-region <Xloc> <Yloc> <RegionIP> <RegionPort> [<RemoteRegionName>]",
                     "Link a hypergrid region (deprecated)", RunCommand);
-                MainConsole.Instance.Commands.AddCommand("hypergrid", false, "unlink-region",
+                MainConsole.Instance.Commands.AddCommand("Hypergrid", false, "unlink-region",
                     "unlink-region <local name>",
                     "Unlink a hypergrid region", RunCommand);
-                MainConsole.Instance.Commands.AddCommand("hypergrid", false, "link-mapping", "link-mapping [<x> <y>]",
+                MainConsole.Instance.Commands.AddCommand("Hypergrid", false, "link-mapping", "link-mapping [<x> <y>]",
                     "Set local coordinate to map HG regions to", RunCommand);
-                MainConsole.Instance.Commands.AddCommand("hypergrid", false, "show hyperlinks", "show hyperlinks",
+                MainConsole.Instance.Commands.AddCommand("Hypergrid", false, "show hyperlinks", "show hyperlinks",
                     "List the HG regions", HandleShow);
             }
         }
@@ -183,8 +179,8 @@ namespace OpenSim.Services.GridService
         public GridRegion LinkRegion(UUID scopeID, string regionDescriptor)
         {
             string reason = string.Empty;
-            int xloc = random.Next(0, Int16.MaxValue) * (int)Constants.RegionSize;
-            return TryLinkRegionToCoords(scopeID, regionDescriptor, xloc, 0, out reason);
+            uint xloc = Util.RegionToWorldLoc((uint)random.Next(0, Int16.MaxValue));
+            return TryLinkRegionToCoords(scopeID, regionDescriptor, (int)xloc, 0, out reason);
         }
 
         private static Random random = new Random();
@@ -200,24 +196,36 @@ namespace OpenSim.Services.GridService
             reason = string.Empty;
             GridRegion regInfo = null;
 
+            mapName = mapName.Trim();
+
             if (!mapName.StartsWith("http"))
             {
-                string host = "127.0.0.1";
-                string portstr;
+                // Formats: grid.example.com:8002:region name
+                //          grid.example.com:region name
+                //          grid.example.com:8002
+                //          grid.example.com
+
+                string host;
+                uint port = 80;
                 string regionName = "";
-                uint port = 0;
+                
                 string[] parts = mapName.Split(new char[] { ':' });
-                if (parts.Length >= 1)
+                
+                if (parts.Length == 0)
                 {
-                    host = parts[0];
+                    reason = "Wrong format for link-region";
+                    return null;
                 }
+                
+                host = parts[0];
+                
                 if (parts.Length >= 2)
                 {
-                    portstr = parts[1];
-                    //m_log.Debug("-- port = " + portstr);
-                    if (!UInt32.TryParse(portstr, out port))
+                    // If it's a number then assume it's a port. Otherwise, it's a region name.
+                    if (!UInt32.TryParse(parts[1], out port))
                         regionName = parts[1];
                 }
+
                 // always take the last one
                 if (parts.Length >= 3)
                 {
@@ -234,14 +242,30 @@ namespace OpenSim.Services.GridService
             }
             else
             {
-                string[] parts = mapName.Split(new char[] {' '});
-                string regionName = String.Empty;
-                if (parts.Length > 1)
+                // Formats: http://grid.example.com region name
+                //          http://grid.example.com "region name"
+                //          http://grid.example.com
+
+                string serverURI;
+                string regionName = "";
+
+                string[] parts = mapName.Split(new char[] { ' ' });
+
+                if (parts.Length == 0)
                 {
-                    regionName = mapName.Substring(parts[0].Length + 1);
-                    regionName = regionName.Trim(new char[] {'"'});
+                    reason = "Wrong format for link-region";
+                    return null;
                 }
-                if (TryCreateLink(scopeID, xloc, yloc, regionName, 0, null, parts[0], ownerID, out regInfo, out reason))
+
+                serverURI = parts[0];
+
+                if (parts.Length >= 2)
+                {
+                    regionName = mapName.Substring(serverURI.Length);
+                    regionName = regionName.Trim(new char[] { '"', ' ' });
+                }
+
+                if (TryCreateLink(scopeID, xloc, yloc, regionName, 0, null, serverURI, ownerID, out regInfo, out reason))
                 {
                     regInfo.RegionName = mapName; 
                     return regInfo;
@@ -258,23 +282,23 @@ namespace OpenSim.Services.GridService
         
         public bool TryCreateLink(UUID scopeID, int xloc, int yloc, string remoteRegionName, uint externalPort, string externalHostName, string serverURI, UUID ownerID, out GridRegion regInfo, out string reason)
         {
-            m_log.DebugFormat("[HYPERGRID LINKER]: Link to {0} {1}, in {2}-{3}", 
+            m_log.InfoFormat("[HYPERGRID LINKER]: Link to {0} {1}, in {2}-{3}", 
                 ((serverURI == null) ? (externalHostName + ":" + externalPort) : serverURI),
-                remoteRegionName, xloc / Constants.RegionSize, yloc / Constants.RegionSize);
+                remoteRegionName, Util.WorldToRegionLoc((uint)xloc), Util.WorldToRegionLoc((uint)yloc));
 
             reason = string.Empty;
             Uri uri = null;
 
             regInfo = new GridRegion();
-            if ( externalPort > 0)
+            if (externalPort > 0)
                 regInfo.HttpPort = externalPort;
             else
-                regInfo.HttpPort = 0;
-            if ( externalHostName != null)
+                regInfo.HttpPort = 80;
+            if (externalHostName != null)
                 regInfo.ExternalHostName = externalHostName;
             else
                 regInfo.ExternalHostName = "0.0.0.0";
-            if ( serverURI != null)
+            if (serverURI != null)
             {
                 regInfo.ServerURI = serverURI;
                 try
@@ -286,7 +310,7 @@ namespace OpenSim.Services.GridService
                 catch {}
             }
 
-            if ( remoteRegionName != string.Empty )
+            if (remoteRegionName != string.Empty)
                 regInfo.RegionName = remoteRegionName;
                 
             regInfo.RegionLocX = xloc;
@@ -299,6 +323,7 @@ namespace OpenSim.Services.GridService
             {
                 if (regInfo.ExternalHostName == m_ThisGatekeeperURI.Host && regInfo.HttpPort == m_ThisGatekeeperURI.Port)
                 {
+                    m_log.InfoFormat("[HYPERGRID LINKER]: Cannot hyperlink to regions on the same grid");
                     reason = "Cannot hyperlink to regions on the same grid";
                     return false;
                 }
@@ -311,7 +336,7 @@ namespace OpenSim.Services.GridService
             if (region != null)
             {
                 m_log.WarnFormat("[HYPERGRID LINKER]: Coordinates {0}-{1} are already occupied by region {2} with uuid {3}",
-                    regInfo.RegionLocX / Constants.RegionSize, regInfo.RegionLocY / Constants.RegionSize,
+                    Util.WorldToRegionLoc((uint)regInfo.RegionLocX), Util.WorldToRegionLoc((uint)regInfo.RegionLocY),
                     region.RegionName, region.RegionID);
                 reason = "Coordinates are already in use";
                 return false;
@@ -347,7 +372,7 @@ namespace OpenSim.Services.GridService
             if (region != null)
             {
                 m_log.DebugFormat("[HYPERGRID LINKER]: Region already exists in coordinates {0} {1}",
-                    region.RegionLocX / Constants.RegionSize, region.RegionLocY / Constants.RegionSize);
+                    Util.WorldToRegionLoc((uint)regInfo.RegionLocX), Util.WorldToRegionLoc((uint)regInfo.RegionLocY));
                 regInfo = region;
                 return true;
             }
@@ -424,10 +449,10 @@ namespace OpenSim.Services.GridService
 //        {
 //            uint ux = 0, uy = 0;
 //            Utils.LongToUInts(realHandle, out ux, out uy);
-//            x = ux / Constants.RegionSize;
-//            y = uy / Constants.RegionSize;
+//            x = Util.WorldToRegionLoc(ux);
+//            y = Util.WorldToRegionLoc(uy);
 //
-//            const uint limit = (4096 - 1) * Constants.RegionSize;
+//            const uint limit = Util.RegionToWorldLoc(4096 - 1);
 //            uint xmin = ux - limit;
 //            uint xmax = ux + limit;
 //            uint ymin = uy - limit;
@@ -502,9 +527,14 @@ namespace OpenSim.Services.GridService
             MainConsole.Instance.Output(new string('-', 72));
             foreach (RegionData r in regions)
             {
-                MainConsole.Instance.Output(String.Format("{0}\n{2,-32} {1}\n",
-                        r.RegionName, r.RegionID, String.Format("{0},{1} ({2},{3})", r.posX, r.posY,
-                            r.posX / Constants.RegionSize, r.posY / Constants.RegionSize)));
+                MainConsole.Instance.Output(
+                    String.Format("{0}\n{2,-32} {1}\n",
+                        r.RegionName, r.RegionID, 
+                        String.Format("{0},{1} ({2},{3})", r.posX, r.posY,
+                                    Util.WorldToRegionLoc((uint)r.posX), Util.WorldToRegionLoc((uint)r.posY)
+                        )
+                    )
+                );
             }
             return;
         }
@@ -529,8 +559,8 @@ namespace OpenSim.Services.GridService
             int xloc, yloc;
             string serverURI;
             string remoteName = null;
-            xloc = Convert.ToInt32(cmdparams[0]) * (int)Constants.RegionSize;
-            yloc = Convert.ToInt32(cmdparams[1]) * (int)Constants.RegionSize;
+            xloc = (int)Util.RegionToWorldLoc((uint)Convert.ToInt32(cmdparams[0]));
+            yloc = (int)Util.RegionToWorldLoc((uint)Convert.ToInt32(cmdparams[1]));
             serverURI = cmdparams[2];
             if (cmdparams.Length > 3)
                 remoteName = string.Join(" ", cmdparams, 3, cmdparams.Length - 3);
@@ -601,13 +631,13 @@ namespace OpenSim.Services.GridService
                 {
                     // old format
                     GridRegion regInfo;
-                    int xloc, yloc;
+                    uint xloc, yloc;
                     uint externalPort;
                     string externalHostName;
                     try
                     {
-                        xloc = Convert.ToInt32(cmdparams[0]);
-                        yloc = Convert.ToInt32(cmdparams[1]);
+                        xloc = Convert.ToUInt32(cmdparams[0]);
+                        yloc = Convert.ToUInt32(cmdparams[1]);
                         externalPort = Convert.ToUInt32(cmdparams[3]);
                         externalHostName = cmdparams[2];
                         //internalPort = Convert.ToUInt32(cmdparams[4]);
@@ -621,10 +651,11 @@ namespace OpenSim.Services.GridService
                     }
 
                     // Convert cell coordinates given by the user to meters
-                    xloc = xloc * (int)Constants.RegionSize;
-                    yloc = yloc * (int)Constants.RegionSize;
+                    xloc = Util.RegionToWorldLoc(xloc);
+                    yloc = Util.RegionToWorldLoc(yloc);
                     string reason = string.Empty;
-                    if (TryCreateLink(UUID.Zero, xloc, yloc, string.Empty, externalPort, externalHostName, UUID.Zero, out regInfo, out reason))
+                    if (TryCreateLink(UUID.Zero, (int)xloc, (int)yloc,
+                                    string.Empty, externalPort, externalHostName, UUID.Zero, out regInfo, out reason))
                     {
                         // What is this? The GridRegion instance will be discarded anyway,
                         // which effectively ignores any local name given with the command.
@@ -704,13 +735,13 @@ namespace OpenSim.Services.GridService
         private void ReadLinkFromConfig(IConfig config)
         {
             GridRegion regInfo;
-            int xloc, yloc;
+            uint xloc, yloc;
             uint externalPort;
             string externalHostName;
             uint realXLoc, realYLoc;
 
-            xloc = Convert.ToInt32(config.GetString("xloc", "0"));
-            yloc = Convert.ToInt32(config.GetString("yloc", "0"));
+            xloc = Convert.ToUInt32(config.GetString("xloc", "0"));
+            yloc = Convert.ToUInt32(config.GetString("yloc", "0"));
             externalPort = Convert.ToUInt32(config.GetString("externalPort", "0"));
             externalHostName = config.GetString("externalHostName", "");
             realXLoc = Convert.ToUInt32(config.GetString("real-xloc", "0"));
@@ -718,18 +749,19 @@ namespace OpenSim.Services.GridService
 
             if (m_enableAutoMapping)
             {
-                xloc = (int)((xloc % 100) + m_autoMappingX);
-                yloc = (int)((yloc % 100) + m_autoMappingY);
+                xloc = (xloc % 100) + m_autoMappingX;
+                yloc = (yloc % 100) + m_autoMappingY;
             }
 
             if (((realXLoc == 0) && (realYLoc == 0)) ||
                 (((realXLoc - xloc < 3896) || (xloc - realXLoc < 3896)) &&
                  ((realYLoc - yloc < 3896) || (yloc - realYLoc < 3896))))
             {
-                xloc = xloc * (int)Constants.RegionSize;
-                yloc = yloc * (int)Constants.RegionSize;
+                xloc = Util.RegionToWorldLoc(xloc);
+                yloc = Util.RegionToWorldLoc(yloc);
                 string reason = string.Empty;
-                if (TryCreateLink(UUID.Zero, xloc, yloc, string.Empty, externalPort, externalHostName, UUID.Zero, out regInfo, out reason))
+                if (TryCreateLink(UUID.Zero, (int)xloc, (int)yloc,
+                                string.Empty, externalPort, externalHostName, UUID.Zero, out regInfo, out reason))
                 {
                     regInfo.RegionName = config.GetString("localName", "");
                 }
