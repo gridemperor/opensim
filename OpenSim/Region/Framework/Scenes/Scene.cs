@@ -103,7 +103,29 @@ namespace OpenSim.Region.Framework.Scenes
         /// <summary>
         /// If false then physical objects are disabled, though collisions will continue as normal.
         /// </summary>
-        public bool PhysicsEnabled { get; set; }
+        public bool PhysicsEnabled 
+        { 
+            get 
+            {
+                return m_physicsEnabled;
+            }
+
+            set
+            {
+                m_physicsEnabled = value;
+
+                if (PhysicsScene != null)
+                {
+                    IPhysicsParameters physScene = PhysicsScene as IPhysicsParameters;
+
+                    if (physScene != null)
+                        physScene.SetPhysicsParameter(
+                            "Active", m_physicsEnabled.ToString(), PhysParameterEntry.APPLY_TO_NONE);
+                }
+            }
+        }
+
+        private bool m_physicsEnabled;
 
         /// <summary>
         /// If false then scripts are not enabled on the smiulator
@@ -208,7 +230,32 @@ namespace OpenSim.Region.Framework.Scenes
         /// <summary>
         /// Temporarily setting to trigger appearance resends at 60 second intervals.
         /// </summary>
-        public bool SendPeriodicAppearanceUpdates { get; set; }
+        public bool SendPeriodicAppearanceUpdates { get; set; }               
+                
+        /// <summary>
+        /// How much a root agent has to change position before updates are sent to viewers.
+        /// </summary>
+        public float RootPositionUpdateTolerance { get; set; }
+
+        /// <summary>
+        /// How much a root agent has to rotate before updates are sent to viewers.
+        /// </summary>
+        public float RootRotationUpdateTolerance { get; set; }
+
+        /// <summary>
+        /// How much a root agent has to change velocity before updates are sent to viewers.
+        /// </summary>
+        public float RootVelocityUpdateTolerance { get; set; }
+
+        /// <summary>
+        /// If greater than 1, we only send terse updates to other root agents on every n updates.
+        /// </summary>
+        public int RootTerseUpdatePeriod { get; set; }
+
+        /// <summary>
+        /// If greater than 1, we only send terse updates to child agents on every n updates.
+        /// </summary>
+        public int ChildTerseUpdatePeriod { get; set; }
 
         protected float m_defaultDrawDistance = 255.0f;
         public float DefaultDrawDistance 
@@ -408,12 +455,6 @@ namespace OpenSim.Region.Framework.Scenes
 
 //        private int m_lastUpdate;
 //        private bool m_firstHeartbeat = true;
-        
-        private UpdatePrioritizationSchemes m_priorityScheme = UpdatePrioritizationSchemes.Time;
-        private bool m_reprioritizationEnabled = true;
-        private double m_reprioritizationInterval = 5000.0;
-        private double m_rootReprioritizationDistance = 10.0;
-        private double m_childReprioritizationDistance = 20.0;
 
         private Timer m_mapGenerationTimer = new Timer();
         private bool m_generateMaptiles;
@@ -646,11 +687,11 @@ namespace OpenSim.Region.Framework.Scenes
         public int MonitorLandTime { get { return landMS; } }
         public int MonitorLastFrameTick { get { return m_lastFrameTick; } }
 
-        public UpdatePrioritizationSchemes UpdatePrioritizationScheme { get { return m_priorityScheme; } }
-        public bool IsReprioritizationEnabled { get { return m_reprioritizationEnabled; } }
-        public double ReprioritizationInterval { get { return m_reprioritizationInterval; } }
-        public double RootReprioritizationDistance { get { return m_rootReprioritizationDistance; } }
-        public double ChildReprioritizationDistance { get { return m_childReprioritizationDistance; } }
+        public UpdatePrioritizationSchemes UpdatePrioritizationScheme { get; set; }
+        public bool IsReprioritizationEnabled { get; set; }
+        public double ReprioritizationInterval { get; set; }
+        public double RootReprioritizationDistance { get; set; }
+        public double ChildReprioritizationDistance { get; set; }
 
         public AgentCircuitManager AuthenticateHandler
         {
@@ -713,11 +754,11 @@ namespace OpenSim.Region.Framework.Scenes
 
         #region Constructors
 
-        public Scene(RegionInfo regInfo, AgentCircuitManager authen,
+        public Scene(RegionInfo regInfo, AgentCircuitManager authen, PhysicsScene physicsScene,
                      SceneCommunicationService sceneGridService,
                      ISimulationDataService simDataService, IEstateDataService estateDataService,
                      IConfigSource config, string simulatorVersion)
-            : this(regInfo)
+            : this(regInfo, physicsScene)
         {
             m_config = config;
             MinFrameTime = 0.089f;
@@ -789,21 +830,6 @@ namespace OpenSim.Region.Framework.Scenes
                 new EventManager.LandObjectAdded(simDataService.StoreLandObject);
             EventManager.OnLandObjectRemoved +=
                 new EventManager.LandObjectRemoved(simDataService.RemoveLandObject);
-
-            m_sceneGraph = new SceneGraph(this);
-
-            // If the scene graph has an Unrecoverable error, restart this sim.
-            // Currently the only thing that causes it to happen is two kinds of specific
-            // Physics based crashes.
-            //
-            // Out of memory
-            // Operating system has killed the plugin
-            m_sceneGraph.UnRecoverableError 
-                += () => 
-                    { 
-                        m_log.ErrorFormat("[SCENE]: Restarting region {0} due to unrecoverable physics crash", Name); 
-                        RestartNow(); 
-                    };
 
             RegisterDefaultSceneEvents();
 
@@ -991,21 +1017,35 @@ namespace OpenSim.Region.Framework.Scenes
 
                 try
                 {
-                    m_priorityScheme = (UpdatePrioritizationSchemes)Enum.Parse(typeof(UpdatePrioritizationSchemes), update_prioritization_scheme, true);
+                    UpdatePrioritizationScheme = (UpdatePrioritizationSchemes)Enum.Parse(typeof(UpdatePrioritizationSchemes), update_prioritization_scheme, true);
                 }
                 catch (Exception)
                 {
                     m_log.Warn("[PRIORITIZER]: UpdatePrioritizationScheme was not recognized, setting to default prioritizer Time");
-                    m_priorityScheme = UpdatePrioritizationSchemes.Time;
+                    UpdatePrioritizationScheme = UpdatePrioritizationSchemes.Time;
                 }
 
-                m_reprioritizationEnabled = interestConfig.GetBoolean("ReprioritizationEnabled", true);
-                m_reprioritizationInterval = interestConfig.GetDouble("ReprioritizationInterval", 5000.0);
-                m_rootReprioritizationDistance = interestConfig.GetDouble("RootReprioritizationDistance", 10.0);
-                m_childReprioritizationDistance = interestConfig.GetDouble("ChildReprioritizationDistance", 20.0);
+                IsReprioritizationEnabled 
+                    = interestConfig.GetBoolean("ReprioritizationEnabled", IsReprioritizationEnabled);
+                ReprioritizationInterval 
+                    = interestConfig.GetDouble("ReprioritizationInterval", ReprioritizationInterval);
+                RootReprioritizationDistance 
+                    = interestConfig.GetDouble("RootReprioritizationDistance", RootReprioritizationDistance);
+                ChildReprioritizationDistance 
+                    = interestConfig.GetDouble("ChildReprioritizationDistance", ChildReprioritizationDistance);
+
+                RootTerseUpdatePeriod = interestConfig.GetInt("RootTerseUpdatePeriod", RootTerseUpdatePeriod);
+                ChildTerseUpdatePeriod = interestConfig.GetInt("ChildTerseUpdatePeriod", ChildTerseUpdatePeriod);
+
+                RootPositionUpdateTolerance 
+                    = interestConfig.GetFloat("RootPositionUpdateTolerance", RootPositionUpdateTolerance);
+                RootRotationUpdateTolerance
+                    = interestConfig.GetFloat("RootRotationUpdateTolerance", RootRotationUpdateTolerance);
+                RootVelocityUpdateTolerance
+                    = interestConfig.GetFloat("RootVelocityUpdateTolerance", RootVelocityUpdateTolerance);
             }
 
-            m_log.DebugFormat("[SCENE]: Using the {0} prioritization scheme", m_priorityScheme);
+            m_log.DebugFormat("[SCENE]: Using the {0} prioritization scheme", UpdatePrioritizationScheme);
 
             #endregion Interest Management
 
@@ -1014,14 +1054,40 @@ namespace OpenSim.Region.Framework.Scenes
             StatsReporter.OnStatsIncorrect += m_sceneGraph.RecalculateStats;
         }
 
-        public Scene(RegionInfo regInfo) : base(regInfo)
-        {
+        public Scene(RegionInfo regInfo, PhysicsScene physicsScene) : base(regInfo)
+        {            
+            m_sceneGraph = new SceneGraph(this);
+            m_sceneGraph.PhysicsScene = physicsScene;
+
+            // If the scene graph has an Unrecoverable error, restart this sim.
+            // Currently the only thing that causes it to happen is two kinds of specific
+            // Physics based crashes.
+            //
+            // Out of memory
+            // Operating system has killed the plugin
+            m_sceneGraph.UnRecoverableError 
+                += () => 
+            { 
+                m_log.ErrorFormat("[SCENE]: Restarting region {0} due to unrecoverable physics crash", Name); 
+                RestartNow(); 
+            };
+
             PhysicalPrims = true;
             CollidablePrims = true;
             PhysicsEnabled = true;
 
             PeriodicBackup = true;
             UseBackup = true;
+
+            IsReprioritizationEnabled = true;
+            UpdatePrioritizationScheme = UpdatePrioritizationSchemes.Time;
+            ReprioritizationInterval = 5000;
+
+            RootRotationUpdateTolerance = 0.1f;
+            RootVelocityUpdateTolerance = 0.001f;
+            RootPositionUpdateTolerance = 0.05f;
+            RootReprioritizationDistance = 10.0;
+            ChildReprioritizationDistance = 20.0;
 
             m_eventManager = new EventManager();
 
@@ -3465,7 +3531,7 @@ namespace OpenSim.Region.Framework.Scenes
             {
                 foreach (string viewer in m_AllowedViewers)
                 {
-                    if (viewer == curViewer.Substring(0, viewer.Length).Trim().ToLower())
+                    if (viewer == curViewer.Substring(0, Math.Min(viewer.Length, curViewer.Length)).Trim().ToLower())
                     {
                         ViewerDenied = false;
                         break;
@@ -3482,7 +3548,7 @@ namespace OpenSim.Region.Framework.Scenes
             {
                 foreach (string viewer in m_BannedViewers)
                 {
-                    if (viewer == curViewer.Substring(0, viewer.Length).Trim().ToLower())
+                    if (viewer == curViewer.Substring(0, Math.Min(viewer.Length, curViewer.Length)).Trim().ToLower())
                     {
                         ViewerDenied = true;
                         break;

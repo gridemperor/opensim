@@ -138,7 +138,7 @@ namespace OpenSim.Framework
         }
 
         private static uint nextXferID = 5000;
-        private static Random randomClass = new Random();
+        private static Random randomClass = new ThreadSafeRandom();
 
         // Get a list of invalid file characters (OS dependent)
         private static string regexInvalidFileChars = "[" + new String(Path.GetInvalidFileNameChars()) + "]";
@@ -507,6 +507,19 @@ namespace OpenSim.Framework
             }
 
             return sb.ToString();
+        }
+
+        public static byte[] DocToBytes(XmlDocument doc)
+        {
+            using (MemoryStream ms = new MemoryStream())
+            using (XmlTextWriter xw = new XmlTextWriter(ms, null))
+            {
+                xw.Formatting = Formatting.Indented;
+                doc.WriteTo(xw);
+                xw.Flush();
+
+                return ms.ToArray();
+            }
         }
 
         /// <summary>
@@ -1307,46 +1320,6 @@ namespace OpenSim.Framework
             return ret;
         }
 
-        public static string Compress(string text)
-        {
-            byte[] buffer = Util.UTF8.GetBytes(text);
-            MemoryStream memory = new MemoryStream();
-            using (GZipStream compressor = new GZipStream(memory, CompressionMode.Compress, true))
-            {
-                compressor.Write(buffer, 0, buffer.Length);
-            }
-
-            memory.Position = 0;
-           
-            byte[] compressed = new byte[memory.Length];
-            memory.Read(compressed, 0, compressed.Length);
-
-            byte[] compressedBuffer = new byte[compressed.Length + 4];
-            Buffer.BlockCopy(compressed, 0, compressedBuffer, 4, compressed.Length);
-            Buffer.BlockCopy(BitConverter.GetBytes(buffer.Length), 0, compressedBuffer, 0, 4);
-            return Convert.ToBase64String(compressedBuffer);
-        }
-
-        public static string Decompress(string compressedText)
-        {
-            byte[] compressedBuffer = Convert.FromBase64String(compressedText);
-            using (MemoryStream memory = new MemoryStream())
-            {
-                int msgLength = BitConverter.ToInt32(compressedBuffer, 0);
-                memory.Write(compressedBuffer, 4, compressedBuffer.Length - 4);
-
-                byte[] buffer = new byte[msgLength];
-
-                memory.Position = 0;
-                using (GZipStream decompressor = new GZipStream(memory, CompressionMode.Decompress))
-                {
-                    decompressor.Read(buffer, 0, buffer.Length);
-                }
-
-                return Util.UTF8.GetString(buffer);
-            }
-        }
-
         /// <summary>
         /// Copy data from one stream to another, leaving the read position of both streams at the beginning.
         /// </summary>
@@ -2027,7 +2000,7 @@ namespace OpenSim.Framework
             {
                 ThreadFuncNum = threadFuncNum;
                 this.context = context;
-                LogThread = true;
+                LogThread = false;
                 Thread = null;
                 Running = false;
                 Aborted = false;
@@ -2207,6 +2180,12 @@ namespace OpenSim.Framework
                             (context == null) ? "" : ("(" + context + ") "),
                             (LogThreadPool >= 2) ? full : partial);
                     }
+                }
+                else
+                {
+                    // Since we didn't log "Queue threadfunc", don't log "Run threadfunc" or "End threadfunc" either.
+                    // Those log lines aren't useful when we don't know which function is running in the thread.
+                    threadInfo.LogThread = false;
                 }
 
                 switch (FireAndForgetMethod)

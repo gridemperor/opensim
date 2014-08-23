@@ -285,11 +285,13 @@ namespace OpenSim.Groups
                 string agentID = request["AgentID"].ToString();
                 string requestingAgentID = request["RequestingAgentID"].ToString();
 
-                m_GroupsService.RemoveAgentFromGroup(requestingAgentID, agentID, groupID);
+                if (!m_GroupsService.RemoveAgentFromGroup(requestingAgentID, agentID, groupID))
+                    NullResult(result, string.Format("Insufficient permissions.", agentID));
+                else
+                    result["RESULT"] = "true";
             }
 
             //m_log.DebugFormat("[XXX]: resp string: {0}", xmlString);
-            result["RESULT"] = "true";
             return Util.UTF8NoBomEncoding.GetBytes(ServerUtils.BuildXmlResponse(result));
         }
 

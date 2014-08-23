@@ -38,6 +38,7 @@ using log4net.Repository;
 using Nini.Config;
 using OpenSim.Framework;
 using OpenSim.Framework.Console;
+using OpenSim.Framework.Monitoring;
 using pCampBot.Interfaces;
 
 namespace pCampBot
@@ -143,10 +144,25 @@ namespace pCampBot
         private HashSet<string> m_defaultBehaviourSwitches = new HashSet<string>();
 
         /// <summary>
+        /// Collects general information on this server (which reveals this to be a misnamed class).
+        /// </summary>
+        private ServerStatsCollector m_serverStatsCollector;
+
+        /// <summary>
         /// Constructor Creates MainConsole.Instance to take commands and provide the place to write data
         /// </summary>
         public BotManager()
         {
+            // We set this to avoid issues with bots running out of HTTP connections if many are run from a single machine
+            // to multiple regions.
+            Settings.MAX_HTTP_CONNECTIONS = int.MaxValue;
+
+//            System.Threading.ThreadPool.SetMaxThreads(600, 240);
+//
+//            int workerThreads, iocpThreads;
+//            System.Threading.ThreadPool.GetMaxThreads(out workerThreads, out iocpThreads);
+//            Console.WriteLine("ThreadPool.GetMaxThreads {0} {1}", workerThreads, iocpThreads);
+
             InitBotSendAgentUpdates = true;
             InitBotRequestObjectTextures = true;
 
@@ -230,6 +246,14 @@ namespace pCampBot
                 "Shows the detailed status and settings of a particular bot.", HandleShowBotStatus);
 
             m_bots = new List<Bot>();
+
+            Watchdog.Enabled = true;
+            StatsManager.RegisterConsoleCommands(m_console);
+
+            m_serverStatsCollector = new ServerStatsCollector();
+            m_serverStatsCollector.Initialise(null);
+            m_serverStatsCollector.Enabled = true;
+            m_serverStatsCollector.Start();
         }
 
         /// <summary>
@@ -321,7 +345,7 @@ namespace pCampBot
 
         private void ConnectBotsInternal(int botCount)
         {
-            MainConsole.Instance.OutputFormat(
+            m_log.InfoFormat(
                 "[BOT MANAGER]: Starting {0} bots connecting to {1}, location {2}, named {3} {4}_<n>",
                 botCount,
                 m_loginUri,
@@ -329,35 +353,37 @@ namespace pCampBot
                 m_firstName,
                 m_lastNameStem);
 
-            MainConsole.Instance.OutputFormat("[BOT MANAGER]: Delay between logins is {0}ms", LoginDelay);
-            MainConsole.Instance.OutputFormat("[BOT MANAGER]: BotsSendAgentUpdates is {0}", InitBotSendAgentUpdates);
-            MainConsole.Instance.OutputFormat("[BOT MANAGER]: InitBotRequestObjectTextures is {0}", InitBotRequestObjectTextures);
+            m_log.DebugFormat("[BOT MANAGER]: Delay between logins is {0}ms", LoginDelay);
+            m_log.DebugFormat("[BOT MANAGER]: BotsSendAgentUpdates is {0}", InitBotSendAgentUpdates);
+            m_log.DebugFormat("[BOT MANAGER]: InitBotRequestObjectTextures is {0}", InitBotRequestObjectTextures);
 
-            int connectedBots = 0;
+            List<Bot> botsToConnect = new List<Bot>();
 
-            for (int i = 0; i < m_bots.Count; i++)
+            lock (m_bots)
             {
-                lock (m_bots)
+                foreach (Bot bot in m_bots)
                 {
-                    if (DisconnectingBots)
-                    {
-                        MainConsole.Instance.Output(
-                            "[BOT MANAGER]: Aborting bot connection due to user-initiated disconnection");
+                    if (bot.ConnectionState == ConnectionState.Disconnected)
+                        botsToConnect.Add(bot);
+
+                    if (botsToConnect.Count >= botCount)
                         break;
-                    }
-
-                    if (m_bots[i].ConnectionState == ConnectionState.Disconnected)
-                    {
-                        m_bots[i].Connect();
-                        connectedBots++;
-
-                        if (connectedBots >= botCount)
-                            break;
-
-                        // Stagger logins
-                        Thread.Sleep(LoginDelay);
-                    }
                 }
+            }
+
+            foreach (Bot bot in botsToConnect)
+            {
+                if (!ConnectingBots)
+                {
+                    MainConsole.Instance.Output(
+                        "[BOT MANAGER]: Aborting bot connection due to user-initiated disconnection");
+                    break;
+                }
+
+                bot.Connect();
+
+                // Stagger logins
+                Thread.Sleep(LoginDelay);
             }
 
             ConnectingBots = false;
@@ -602,59 +628,76 @@ namespace pCampBot
                 }
 
                 MainConsole.Instance.OutputFormat(
-                    "Removed behaviours {0} to bot {1}", 
+                    "Removed behaviours {0} from bot {1}", 
                     string.Join(", ", behavioursRemoved.ConvertAll<string>(b => b.Name).ToArray()), bot.Name);
             }
         }
 
         private void HandleDisconnect(string module, string[] cmd)
         {
+            List<Bot> connectedBots;
+            int botsToDisconnectCount;
+
             lock (m_bots)
+                connectedBots = m_bots.FindAll(b => b.ConnectionState == ConnectionState.Connected);
+
+            if (cmd.Length == 1)
             {
-                int botsToDisconnect;
-                int connectedBots = m_bots.Count(b => b.ConnectionState == ConnectionState.Connected);
-
-                if (cmd.Length == 1)
-                {
-                    botsToDisconnect = connectedBots;
-                }
-                else
-                {
-                    if (!ConsoleUtil.TryParseConsoleNaturalInt(MainConsole.Instance, cmd[1], out botsToDisconnect))
-                        return;
-
-                    botsToDisconnect = Math.Min(botsToDisconnect, connectedBots);
-                }
-
-                DisconnectingBots = true;
-
-                MainConsole.Instance.OutputFormat("Disconnecting {0} bots", botsToDisconnect);
-
-                int disconnectedBots = 0;
-
-                for (int i = m_bots.Count - 1; i >= 0; i--)
-                {
-                    if (disconnectedBots >= botsToDisconnect)
-                        break;
-
-                    Bot thisBot = m_bots[i];
-
-                    if (thisBot.ConnectionState == ConnectionState.Connected)
-                    {
-                        Util.FireAndForget(o => thisBot.Disconnect());
-                        disconnectedBots++;
-                    }
-                }
-
-                DisconnectingBots = false;
+                botsToDisconnectCount = connectedBots.Count;
             }
+            else
+            {
+                if (!ConsoleUtil.TryParseConsoleNaturalInt(MainConsole.Instance, cmd[1], out botsToDisconnectCount))
+                    return;
+
+                botsToDisconnectCount = Math.Min(botsToDisconnectCount, connectedBots.Count);
+            }
+
+            DisconnectingBots = true;
+
+            Thread disconnectBotThread = new Thread(o => DisconnectBotsInternal(connectedBots, botsToDisconnectCount));
+
+            disconnectBotThread.Name = "Bots disconnection thread";
+            disconnectBotThread.Start();
+        }
+
+        private void DisconnectBotsInternal(List<Bot> connectedBots, int disconnectCount)
+        {             
+            ConnectingBots = false;
+
+            MainConsole.Instance.OutputFormat("Disconnecting {0} bots", disconnectCount);
+
+            int disconnectedBots = 0;
+
+            for (int i = connectedBots.Count - 1; i >= 0; i--)
+            {
+                if (disconnectedBots >= disconnectCount)
+                    break;
+
+                Bot thisBot = connectedBots[i];
+
+                if (thisBot.ConnectionState == ConnectionState.Connected)
+                {
+                    ThreadPool.QueueUserWorkItem(o => thisBot.Disconnect());
+                    disconnectedBots++;
+                }
+            }
+
+            DisconnectingBots = false;
         }
 
         private void HandleSit(string module, string[] cmd)
         {
             lock (m_bots)
             {
-                m_bots.ForEach(b => b.SitOnGround());
+                foreach (Bot bot in m_bots)
+                {
+                    if (bot.ConnectionState == ConnectionState.Connected)
+                    {
+                        MainConsole.Instance.OutputFormat("Sitting bot {0} on ground.", bot.Name);
+                        bot.SitOnGround();
+                    }
+                }
             }
         }
 
@@ -662,7 +705,14 @@ namespace pCampBot
         {
             lock (m_bots)
             {
-                m_bots.ForEach(b => b.Stand());
+                foreach (Bot bot in m_bots)
+                {
+                    if (bot.ConnectionState == ConnectionState.Connected)
+                    {
+                        MainConsole.Instance.OutputFormat("Standing bot {0} from ground.", bot.Name);
+                        bot.Stand();
+                    }
+                }
             }
         }
 
@@ -680,6 +730,8 @@ namespace pCampBot
             }
 
             MainConsole.Instance.Output("Shutting down");
+
+            m_serverStatsCollector.Close();
 
             Environment.Exit(0);
         }

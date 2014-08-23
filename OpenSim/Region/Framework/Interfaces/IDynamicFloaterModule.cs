@@ -25,53 +25,28 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-using System;
-using Nini.Config;
+using System.Collections.Generic;
+using OpenMetaverse;
 using OpenSim.Framework;
-using OpenSim.Framework.Communications;
-using OpenSim.Framework.Servers;
-using OpenSim.Region.Framework;
-using OpenSim.Region.Framework.Interfaces;
 using OpenSim.Region.Framework.Scenes;
-using OpenSim.Region.Physics.Manager;
-using OpenSim.Services.Interfaces;
 
-namespace OpenSim.Tests.Common.Mock
+namespace OpenSim.Region.Framework.Interfaces
 {
-    public class TestScene : Scene
-    {
-        public TestScene(
-            RegionInfo regInfo, AgentCircuitManager authen, PhysicsScene physicsScene,
-            SceneCommunicationService sceneGridService, ISimulationDataService simDataService, IEstateDataService estateDataService,
-            IConfigSource config, string simulatorVersion)
-            : base(regInfo, authen, physicsScene, sceneGridService, simDataService, estateDataService,
-                   config, simulatorVersion)
-        {
-        }
+    public delegate bool HandlerDelegate(IClientAPI client, FloaterData data, string[] msg);
 
-        ~TestScene()
-        {
-            //Console.WriteLine("TestScene destructor called for {0}", RegionInfo.RegionName);
-            Console.WriteLine("TestScene destructor called");
-        }
-        
-        /// <summary>
-        /// Temporarily override session authentication for tests (namely teleport).
-        /// </summary>
-        /// <remarks>
-        /// TODO: This needs to be mocked out properly.
-        /// </remarks>
-        /// <param name="agent"></param>
-        /// <returns></returns>
-        public override bool VerifyUserPresence(AgentCircuitData agent, out string reason)
-        {
-            reason = String.Empty;
-            return true;
-        }
-            
-        public AsyncSceneObjectGroupDeleter SceneObjectGroupDeleter
-        {
-            get { return m_asyncSceneObjectDeleter; }
-        }
+    public abstract class FloaterData
+    {
+        public abstract int Channel { get; } 
+        public abstract string FloaterName { get; set; }
+        public virtual string XmlName { get; set; }
+        public virtual string XmlText { get; set; }
+        public virtual HandlerDelegate Handler { get; set; }
+    }
+
+
+    public interface IDynamicFloaterModule
+    {
+        void DoUserFloater(UUID agentID, FloaterData dialogData, string configuration);
+        void FloaterControl(ScenePresence sp, FloaterData d, string msg);
     }
 }

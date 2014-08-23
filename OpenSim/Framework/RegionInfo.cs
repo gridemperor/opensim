@@ -101,7 +101,6 @@ namespace OpenSim.Framework
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
         private static readonly string LogHeader = "[REGION INFO]";
 
-        public bool commFailTF = false;
         public string RegionFile = String.Empty;
         public bool isSandbox = false;
         public bool Persistent = true;
@@ -879,11 +878,6 @@ namespace OpenSim.Framework
 
             if (MaptileStaticFile != String.Empty)
                 config.Set("MaptileStaticFile", MaptileStaticFile);
-        }
-
-        public bool ignoreIncomingConfiguration(string configuration_key, object configuration_result)
-        {
-            return true;
         }
 
         public void SaveRegionToFile(string description, string filename)

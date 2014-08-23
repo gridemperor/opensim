@@ -1529,7 +1529,7 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
             else
             {
                 // The destination region just doesn't exist
-                failureReason = "Cannot cross into non-existant region";
+                failureReason = "Cannot cross into non-existent region";
             }
 
             if (neighbourRegion == null)
@@ -1786,8 +1786,8 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
             m_entityTransferStateMachine.ResetFromTransit(agent.UUID);
 
             // now we have a child agent in this region. Request all interesting data about other (root) agents
-            agent.SendOtherAgentsAvatarDataToMe();
-            agent.SendOtherAgentsAppearanceToMe();
+            agent.SendOtherAgentsAvatarDataToClient();
+            agent.SendOtherAgentsAppearanceToClient();
 
             // Backwards compatibility. Best effort
             if (version == "Unknown" || version == string.Empty)

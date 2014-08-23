@@ -216,6 +216,10 @@ HGAssetServiceConnector = "HGAssetService@8002/OpenSim.Server.Handlers.dll:Asset
     ;; Allow Hyperlinks to be created at the console
     HypergridLinker = true
 
+    ;; Allow supporting viewers to export content
+    ;; Set to false to prevent export
+    ExportSupported = true
+
     ;; If you have this set under [Hypergrid], no need to set it here, leave it commented
     ; GatekeeperURI = "http://127.0.0.1:8002"
 
@@ -364,6 +368,9 @@ HGAssetServiceConnector = "HGAssetService@8002/OpenSim.Server.Handlers.dll:Asset
 
     ; For V2 map
     MapTileURL = "http://127.0.0.1:8002";
+
+    ; Url to search service
+    ; SearchURL = "http://127.0.0.1:8002";
 
     ; For V2/3 Web Profiles
     ; Work in progress: The ProfileServerURL/OpenIDServerURL are
@@ -662,6 +669,5 @@ HGAssetServiceConnector = "HGAssetService@8002/OpenSim.Server.Handlers.dll:Asset
 	
 [BakedTextureService]
     LocalServiceModule = "OpenSim.Server.Handlers.dll:XBakes"
-    ;; This directory must exist and be writable for the user ROBUST runs as
-    BaseDirectory = "/data/bakes"
-
+    ;; This directory must be writable by the user ROBUST runs as. It will be created automatically.
+    BaseDirectory = "./bakes"

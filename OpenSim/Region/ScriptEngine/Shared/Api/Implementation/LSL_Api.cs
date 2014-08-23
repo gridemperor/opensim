@@ -120,6 +120,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         protected IUrlModule m_UrlModule = null;
         protected Dictionary<UUID, UserInfoCacheEntry> m_userInfoCache = new Dictionary<UUID, UserInfoCacheEntry>();
         protected int EMAIL_PAUSE_TIME = 20;  // documented delay value for smtp.
+        protected string m_internalObjectHost = "lsl.opensim.local";
+        protected bool m_restrictEmail = false;
         protected ISoundModule m_SoundModule = null;
 
         //An array of HTTP/1.1 headers that are not allowed to be used
@@ -193,11 +195,19 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             if (seConfigSource != null)
             {
+                IConfig lslConfig = seConfigSource.Configs["LL-Functions"];
+                if (lslConfig != null)
+                {
+                    m_restrictEmail = lslConfig.GetBoolean("RestrictEmail", m_restrictEmail);
+                }
+
                 IConfig smtpConfig = seConfigSource.Configs["SMTP"];
                 if (smtpConfig != null) 
                 {
                     // there's an smtp config, so load in the snooze time.
                     EMAIL_PAUSE_TIME = smtpConfig.GetInt("email_pause_time", EMAIL_PAUSE_TIME);
+
+                    m_internalObjectHost = smtpConfig.GetString("internal_object_host", m_internalObjectHost);
                 }
             }
         }
@@ -544,10 +554,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         public LSL_Float llFrand(double mag)
         {
             m_host.AddScriptLPS(1);
-            lock (Util.RandomClass)
-            {
-                return Util.RandomClass.NextDouble() * mag;
-            }
+
+            return Util.RandomClass.NextDouble() * mag;
         }
 
         public LSL_Integer llFloor(double f)
@@ -3389,6 +3397,30 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return;
             }
 
+            //Restrict email destination to the avatars registered email address?
+            //The restriction only applies if the destination address is not local.
+            if (m_restrictEmail == true && address.Contains(m_internalObjectHost) == false)
+            {
+                UserAccount account =
+                        World.UserAccountService.GetUserAccount(
+                            World.RegionInfo.ScopeID,
+                            m_host.OwnerID);
+
+                if (account == null)
+                {
+                    Error("llEmail", "Can't find user account for '" + m_host.OwnerID.ToString() + "'");
+                    return;
+                }
+
+                if (String.IsNullOrEmpty(account.Email))
+                {
+                    Error("llEmail", "User account has not registered an email address.");
+                    return;
+                }
+
+                address = account.Email;
+            }
+
             emailModule.SendEmail(m_host.UUID, address, subject, message);
             ScriptSleep(EMAIL_PAUSE_TIME * 1000);
         }
@@ -4106,6 +4138,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             if (item == null)
             {
                 Error("llGiveInventory", "Can't find inventory object '" + inventory + "'");
+                return;
             }
 
             UUID objId = item.ItemID;

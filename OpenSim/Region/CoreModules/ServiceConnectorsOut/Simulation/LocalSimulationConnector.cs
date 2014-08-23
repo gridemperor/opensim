@@ -295,6 +295,7 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.Simulation
                     reason = "Destination is a variable-sized region, and source is an old simulator. Consider upgrading.";
                     m_log.DebugFormat("[LOCAL SIMULATION CONNECTOR]: Request to access this variable-sized region from {0} simulator was denied", theirVersionNumber);
                     return false;
+                
                 }
 
                 return m_scenes[destination.RegionID].QueryAccess(agentID, agentHomeURI, viaTeleport, position, out reason);

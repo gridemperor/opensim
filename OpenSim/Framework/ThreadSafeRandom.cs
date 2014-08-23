@@ -26,52 +26,47 @@
  */
 
 using System;
-using Nini.Config;
-using OpenSim.Framework;
-using OpenSim.Framework.Communications;
-using OpenSim.Framework.Servers;
-using OpenSim.Region.Framework;
-using OpenSim.Region.Framework.Interfaces;
-using OpenSim.Region.Framework.Scenes;
-using OpenSim.Region.Physics.Manager;
-using OpenSim.Services.Interfaces;
 
-namespace OpenSim.Tests.Common.Mock
+namespace OpenSim.Framework
 {
-    public class TestScene : Scene
+    /// <summary>
+    /// A thread-safe Random since the .NET version is not.
+    /// See http://msdn.microsoft.com/en-us/library/system.random%28v=vs.100%29.aspx
+    /// </summary>
+    public class ThreadSafeRandom : Random
     {
-        public TestScene(
-            RegionInfo regInfo, AgentCircuitManager authen, PhysicsScene physicsScene,
-            SceneCommunicationService sceneGridService, ISimulationDataService simDataService, IEstateDataService estateDataService,
-            IConfigSource config, string simulatorVersion)
-            : base(regInfo, authen, physicsScene, sceneGridService, simDataService, estateDataService,
-                   config, simulatorVersion)
+        public ThreadSafeRandom() : base() {}
+
+        public ThreadSafeRandom(int seed): base (seed) {}
+
+        public override int Next()
         {
+            lock (this)
+                return base.Next();
         }
 
-        ~TestScene()
+        public override int Next(int maxValue)
         {
-            //Console.WriteLine("TestScene destructor called for {0}", RegionInfo.RegionName);
-            Console.WriteLine("TestScene destructor called");
+            lock (this)
+                return base.Next(maxValue);
         }
-        
-        /// <summary>
-        /// Temporarily override session authentication for tests (namely teleport).
-        /// </summary>
-        /// <remarks>
-        /// TODO: This needs to be mocked out properly.
-        /// </remarks>
-        /// <param name="agent"></param>
-        /// <returns></returns>
-        public override bool VerifyUserPresence(AgentCircuitData agent, out string reason)
+
+        public override int Next(int minValue, int maxValue)
         {
-            reason = String.Empty;
-            return true;
+            lock (this)
+                return base.Next(minValue, maxValue);
         }
-            
-        public AsyncSceneObjectGroupDeleter SceneObjectGroupDeleter
+
+        public override void NextBytes(byte[] buffer)
         {
-            get { return m_asyncSceneObjectDeleter; }
+            lock (this)
+                base.NextBytes(buffer);
+        }
+
+        public override double NextDouble()
+        {
+            lock (this)
+                return base.NextDouble();
         }
     }
 }

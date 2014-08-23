@@ -210,7 +210,7 @@
     ;; OpenDynamicsEngine was the previous default physics engine in OpenSimulator 0.7.6.1 and before.  
     ;; It continues to provide a workable physics implementation.  It does not currently support varregions.
     ;; basicphysics effectively does not model physics at all, making all objects phantom.   
-    ;; Default is OpenDynamicsEngine
+    ;; Default is BulletSim
     ; physics = OpenDynamicsEngine
     ; physics = BulletSim
     ; physics = basicphysics
@@ -538,15 +538,19 @@
 
 
 [SimulatorFeatures]
-    ;# {MapImageServerURI} {} {URL for the map server} {}
-    ; Experimental new information sent in SimulatorFeatures cap for Kokua
-    ; viewers 
-    ; meant to override the MapImage and search server url given at login, and varying 
-    ; on a sim-basis.
-    ; Viewers that don't understand it, will ignore it
-    ;MapImageServerURI = "http://127.0.0.1:9000/"
+
     ;# {SearchServerURI} {} {URL of the search server} {}
+    ;; This is identical to the Robust LoginService SearchURL setting
+    ;; and will override that value if set here. The Robust setting
+    ;; provides a working default for the grid and setting here is 
+    ;; optional.
     ;SearchServerURI = "http://127.0.0.1:9000/"
+    ;# {DestinationGuideURI} {} {URL of the destination guide} {}
+    ;;
+    ;; This serves the same purpose as the DestinationGuideURI in the
+    ;; LoginService setting in the Robust server. This will override 
+    ;; the Robust setting if desired as an option.
+    ;DestinationGuideURI = "http://127.0.0.1:9000/"
 
 
 [Chat]
